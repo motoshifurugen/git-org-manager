@@ -7,10 +7,27 @@ const props = defineProps<{
 }>()
 const emit = defineEmits(['apply', 'close'])
 
-// タグ付き・タグなしで分割
-const taggedCommits = computed(() => props.commitList.filter(c => c.tag_name))
-const untaggedCommits = computed(() => props.commitList.filter(c => !c.tag_name))
-const showUntagged = ref(false)
+// タグあり/なしでグループ化（連続したタグなしをまとめる）
+const groupedCommits = computed(() => {
+  const groups = []
+  let buffer = []
+  for (const c of props.commitList) {
+    if (c.tag_name) {
+      if (buffer.length > 0) {
+        groups.push({ type: 'untagged', commits: [...buffer] })
+        buffer = []
+      }
+      groups.push({ type: 'tagged', commit: c })
+    } else {
+      buffer.push(c)
+    }
+  }
+  if (buffer.length > 0) {
+    groups.push({ type: 'untagged', commits: [...buffer] })
+  }
+  return groups
+})
+const showUntagged = ref<{ [key: number]: boolean }>({})
 </script>
 
 <template>
@@ -29,32 +46,36 @@ const showUntagged = ref(false)
             </tr>
           </thead>
           <tbody>
-            <!-- タグ付きコミットは常に表示 -->
-            <tr v-for="c in taggedCommits" :key="c.id" style="border-bottom:1px solid #e0e4ea;">
-              <td style="padding:0.5em 0.7em; font-family:monospace; text-align:center;">{{ c.created_at }}</td>
-              <td style="padding:0.5em 0.7em; text-align:center;">{{ c.message || '(メッセージなし)' }}</td>
-              <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ c.tag_name || '' }}</td>
-              <td style="padding:0.5em 0.7em; text-align:center;">{{ c.author }}</td>
-              <td style="padding:0.5em 0.7em; text-align:right;">
-                <button class="history-apply-btn" @click="$emit('apply', c.id)">適用</button>
-              </td>
-            </tr>
-            <!-- タグなしコミットは折りたたみ -->
-            <tr v-if="untaggedCommits.length > 0">
-              <td :colspan="5" style="text-align:center; background:#f6f7fa; cursor:pointer; color:#347474; font-weight:bold;" @click="showUntagged = !showUntagged">
-                <span v-if="!showUntagged">▼ タグのない{{ untaggedCommits.length }}件のコミットを表示</span>
-                <span v-else>▲ タグのない{{ untaggedCommits.length }}件のコミットを非表示</span>
-              </td>
-            </tr>
-            <tr v-for="c in untaggedCommits" v-show="showUntagged" :key="c.id" style="border-bottom:1px solid #e0e4ea;">
-              <td style="padding:0.5em 0.7em; font-family:monospace; text-align:center;">{{ c.created_at }}</td>
-              <td style="padding:0.5em 0.7em; text-align:center;">{{ c.message || '(メッセージなし)' }}</td>
-              <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ c.tag_name || '' }}</td>
-              <td style="padding:0.5em 0.7em; text-align:center;">{{ c.author }}</td>
-              <td style="padding:0.5em 0.7em; text-align:right;">
-                <button class="history-apply-btn" @click="$emit('apply', c.id)">適用</button>
-              </td>
-            </tr>
+            <template v-for="(group, idx) in groupedCommits">
+              <template v-if="group.type === 'tagged' && group.commit">
+                <tr :key="'tagged-' + group.commit.id">
+                  <td style="padding:0.5em 0.7em; font-family:monospace; text-align:center;">{{ group.commit.created_at }}</td>
+                  <td style="padding:0.5em 0.7em; text-align:center;">{{ group.commit.message || '(メッセージなし)' }}</td>
+                  <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ group.commit.tag_name || '' }}</td>
+                  <td style="padding:0.5em 0.7em; text-align:center;">{{ group.commit.author }}</td>
+                  <td style="padding:0.5em 0.7em; text-align:right;">
+                    <button class="history-apply-btn" @click="$emit('apply', group.commit.id)">適用</button>
+                  </td>
+                </tr>
+              </template>
+              <template v-else-if="group.type === 'untagged' && group.commits">
+                <tr :key="'untagged-header-' + idx">
+                  <td :colspan="5" style="text-align:center; background:#f6f7fa; cursor:pointer; color:#347474; font-weight:bold;" @click="showUntagged[idx] = !showUntagged[idx]">
+                    <span v-if="!showUntagged[idx]">▼ タグのない{{ group.commits.length }}件のコミットを表示</span>
+                    <span v-else>▲ タグのない{{ group.commits.length }}件のコミットを非表示</span>
+                  </td>
+                </tr>
+                <tr v-for="c in group.commits || []" v-show="showUntagged[idx]" :key="'untagged-' + c.id" style="border-bottom:1px solid #e0e4ea;">
+                  <td style="padding:0.5em 0.7em; font-family:monospace; text-align:center;">{{ c.created_at }}</td>
+                  <td style="padding:0.5em 0.7em; text-align:center;">{{ c.message || '(メッセージなし)' }}</td>
+                  <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ c.tag_name || '' }}</td>
+                  <td style="padding:0.5em 0.7em; text-align:center;">{{ c.author }}</td>
+                  <td style="padding:0.5em 0.7em; text-align:right;">
+                    <button class="history-apply-btn" @click="$emit('apply', c.id)">適用</button>
+                  </td>
+                </tr>
+              </template>
+            </template>
           </tbody>
         </table>
       </div>
