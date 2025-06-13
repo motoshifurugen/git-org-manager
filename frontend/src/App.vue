@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { useStore } from 'vuex'
 import OrganizationTree from './components/OrganizationTree.vue'
 import DraftStateBar from './components/DraftStateBar.vue'
@@ -16,6 +16,11 @@ const baseFlat = computed(() => flatten(treeNodes.value))
 const toast = ref<{ message: string; type: 'success' | 'error' } | null>(null)
 const commitMessage = ref('')
 const isCommitting = ref(false)
+const commitId = ref('')
+const showTagModal = ref(false)
+const tagName = ref<string | undefined>(undefined)
+const tagInput = ref('')
+const isTagSubmitting = ref(false)
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -69,6 +74,7 @@ async function fetchLatestTree() {
     const commitRes = await fetch('http://localhost:3001/api/commits/latest')
     if (!commitRes.ok) throw new Error('最新コミット取得失敗')
     const commit = await commitRes.json()
+    commitId.value = commit.id
     treeId.value = commit.tree_id
     const treeRes = await fetch(`http://localhost:3001/api/trees/${treeId.value}`)
     if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
@@ -158,6 +164,85 @@ function getOldNode(newNode: any) {
   const baseFlat = flatten(treeNodes.value)
   return baseFlat.find((n: any) => n.id === newNode.id) || {}
 }
+
+function openTagModal() {
+  showTagModal.value = true
+}
+
+function closeTagModal() {
+  showTagModal.value = false
+}
+
+async function fetchTagName(commitId: string) {
+  try {
+    const res = await fetch(`http://localhost:3001/api/tags/${commitId}`)
+    if (!res.ok) {
+      tagName.value = undefined
+      return
+    }
+    const tag = await res.json()
+    tagName.value = tag?.name || undefined
+  } catch {
+    tagName.value = undefined
+  }
+}
+
+watch(
+  [() => hasDraft.value, () => commitId.value],
+  ([draft, cid]) => {
+    if (!draft && cid) {
+      fetchTagName(cid)
+    } else {
+      tagName.value = undefined
+    }
+  },
+  { immediate: true }
+)
+
+async function submitTag() {
+  const name = tagInput.value.trim()
+  if (!name) {
+    showToast('タグ名を入力してください', 'error')
+    return
+  }
+  if (name.length > 50) {
+    showToast('タグ名は50文字以内で入力してください', 'error')
+    return
+  }
+  isTagSubmitting.value = true
+  try {
+    const res = await fetch('http://localhost:3001/api/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commit_id: commitId.value, name })
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      if (res.status === 409) {
+        showToast('このコミットには既にタグが付与されています', 'error')
+      } else if (err?.error) {
+        showToast('タグ付与失敗: ' + err.error, 'error')
+      } else {
+        showToast('タグ付与に失敗しました', 'error')
+      }
+      return
+    }
+    const data = await res.json()
+    tagName.value = data.name
+    showToast('タグを付与しました', 'success')
+    closeTagModal()
+  } catch (e: any) {
+    showToast('タグ付与に失敗しました', 'error')
+  } finally {
+    isTagSubmitting.value = false
+  }
+}
+
+watch(showTagModal, (v) => {
+  if (v) {
+    tagInput.value = tagName.value || ''
+  }
+})
 </script>
 
 <template>
@@ -169,8 +254,31 @@ function getOldNode(newNode: any) {
       @close="toast = null"
     />
     <h1>組織構造ツリー</h1>
-    <div style="display: flex; align-items: center; gap: 1em;">
-      <DraftStateBar :hasDraft="!isCommitting && hasDraft" @diff="onDiff" />
+    <div style="display: flex; align-items: center; gap: 1em; margin-bottom: 0.7em;">
+      <DraftStateBar
+        :hasDraft="!isCommitting && hasDraft"
+        :tagName="tagName"
+        :commitId="commitId"
+        @diff="onDiff"
+        @edit-tag="openTagModal"
+      />
+    </div>
+    <div v-if="showTagModal" class="modal-overlay" @click.self="closeTagModal">
+      <div class="modal-content">
+        <h2>タグ付与</h2>
+        <div style="margin-bottom: 1.2em;">
+          <label style="font-weight: bold;">タグ名</label>
+          <input v-model="tagInput" maxlength="50" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="タグ名を入力" :disabled="isTagSubmitting" />
+        </div>
+        <button @click="submitTag" :disabled="isTagSubmitting">
+          <span v-if="isTagSubmitting" class="spinner" style="margin-right:0.7em;"></span>
+          保存
+        </button>
+        <button @click="closeTagModal" :disabled="isTagSubmitting">閉じる</button>
+        <div v-if="isTagSubmitting" class="modal-committing-overlay">
+          <span class="spinner"></span>
+        </div>
+      </div>
     </div>
     <div v-if="loading">読み込み中...</div>
     <div v-else-if="error">エラー: {{ error }}</div>
