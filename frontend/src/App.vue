@@ -6,6 +6,7 @@ import DraftStateBar from './components/DraftStateBar.vue'
 import ToastMessage from './components/ToastMessage.vue'
 import CommitHistoryModal from './components/CommitHistoryModal.vue'
 import ShareModal from './components/ShareModal.vue'
+import type { CSSProperties } from 'vue'
 
 const store = useStore()
 const treeId = ref('')
@@ -30,6 +31,7 @@ const isShared = ref(false)
 const showShareModal = ref(false)
 const sharedCommits = ref<any[]>([])
 const shareLoading = ref(false)
+const showSyncTooltip = ref(false)
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -365,13 +367,14 @@ function handleFetchShare() {
   showToast('fetch機能は未実装です', 'error')
 }
 
-const iconButtonStyle = computed(() => ({
+const iconButtonStyle = computed<CSSProperties>(() => ({
   background: 'none',
   border: 'none',
   cursor: 'pointer',
-  fontSize: '1.5em',
+  fontSize: '1.25em',
   color: '#347474',
   display: 'inline-flex',
+  flexDirection: 'column',
   alignItems: 'center',
   margin: 0,
   padding: '10px',
@@ -389,7 +392,7 @@ const iconButtonStyle = computed(() => ({
       @close="toast = null"
     />
     <h1>組織構造ツリー</h1>
-    <div style="display: flex; align-items: center; gap: 1em; margin-bottom: 0.7em; justify-content: space-between;">
+    <div style="display: flex; align-items: center; margin-bottom: 0.7em;">
       <DraftStateBar
         :hasDraft="!isCommitting && hasDraft"
         :tagName="tagName"
@@ -398,21 +401,28 @@ const iconButtonStyle = computed(() => ({
         @edit-tag="openTagModal"
         @clear="onClearDraft"
       />
-      <button
-        @click="showHistoryModal = true"
-        title="コミット履歴を表示"
-        :style="{...iconButtonStyle, marginLeft: 'auto'}"
-      >
-        <span style="font-size:1.2em; margin:0; padding:0;">🗂️</span>
-      </button>
-      <button
-        @click="openShareModal"
-        title="このコミットを共有"
-        :disabled="isShared"
-        :style="{...iconButtonStyle, opacity: isShared ? 0.4 : 1}"
-      >
-        <span style="font-size:1.2em; margin:0; padding:0;">🌐</span>
-      </button>
+      <div style="margin-left: auto; display: flex; gap: 0;">
+        <button
+          @click="showHistoryModal = true"
+          title="コミット履歴を表示"
+          :style="iconButtonStyle"
+        >
+          <span style="font-size:1.2em; margin:0; padding:0 12px;">🗂️</span>
+          <span class="icon-label">履歴</span>
+        </button>
+        <button
+          @click="openShareModal"
+          title="このコミットを共有"
+          :disabled="isShared"
+          :style="{...iconButtonStyle, position: 'relative', opacity: isShared ? 0.4 : 1}"
+          @mouseenter="showSyncTooltip = isShared"
+          @mouseleave="showSyncTooltip = false"
+        >
+          <span style="font-size:1.2em; margin:0; padding:0 12px;">🌐</span>
+          <span class="icon-label">同期</span>
+          <div v-if="showSyncTooltip" class="sync-tooltip">最新に同期されています</div>
+        </button>
+      </div>
     </div>
     <div v-if="showHistoryModal">
       <CommitHistoryModal
@@ -624,6 +634,29 @@ h1 {
   min-height: 200px;
   max-height: 60vh;
   overflow-y: auto;
+}
+.sync-tooltip {
+  position: absolute;
+  left: 50%;
+  bottom: calc(100% + 8px);
+  transform: translateX(-50%);
+  background: #222;
+  color: #fff;
+  padding: 0.4em 1.1em;
+  border-radius: 7px;
+  font-size: 0.98em;
+  white-space: nowrap;
+  z-index: 10;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.13);
+  pointer-events: none;
+}
+.icon-label {
+  font-size: 0.78em;
+  color: #888;
+  display: block;
+  margin-top: 2px;
+  text-align: center;
+  letter-spacing: 0.05em;
 }
 </style>
 
