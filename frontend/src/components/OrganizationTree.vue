@@ -1,15 +1,32 @@
 <script setup lang="ts">
 import { defineProps, defineExpose, computed } from 'vue'
-
-type OrgNode = {
-  id: string
-  name: string
-  depth: number
-  children: OrgNode[]
-}
+import { useStore } from 'vuex'
+import NodeEditPanel from './NodeEditPanel.vue'
+import type { OrgNode } from '../store'
 
 const props = defineProps<{ nodes: OrgNode[]; maxDepth?: number }>()
 const maxDepth = props.maxDepth ?? 5
+
+const store = useStore()
+
+// ノード選択状態
+const selectedNodeId = computed(() => store.state.selectedNodeId)
+const draftNodes = computed(() => store.state.draftNodes)
+
+// ノードリストをフラット化
+function flatten(nodes: OrgNode[]): OrgNode[] {
+  const res: OrgNode[] = []
+  function dfs(n: OrgNode) {
+    res.push(n)
+    if (n.children) n.children.forEach(dfs)
+  }
+  nodes.forEach(dfs)
+  return res
+}
+const flatNodes = computed(() => flatten(draftNodes.value.length ? draftNodes.value : props.nodes))
+
+// 選択中ノード
+const selectedNode = computed(() => flatNodes.value.find(n => n.id === selectedNodeId.value) || null)
 
 defineExpose({})
 
@@ -49,11 +66,11 @@ function getAllRows(nodes: OrgNode[], maxDepth: number): (string | null)[][] {
   return rows
 }
 
-const tableRows = getAllRows(props.nodes, maxDepth)
+const tableRows = computed(() => getAllRows(flatNodes.value.filter(n => !n.parentId), maxDepth))
 
 // 末端組織（リーフノード）かどうかを判定する配列を作成
 const isLeafRow = computed(() => {
-  return tableRows.map(row => {
+  return tableRows.value.map(row => {
     // 末端組織は一番右側（depth最大）の非nullセルがその組織名
     // もしくは、rowの中で一番右の非nullが末端
     for (let i = maxDepth - 1; i >= 0; i--) {
@@ -64,6 +81,23 @@ const isLeafRow = computed(() => {
     return -1
   })
 })
+
+// ノード選択
+function onSelectNode(nodeId: string) {
+  store.commit('selectNode', nodeId)
+}
+// ノード追加
+function onAddChild(parentId: string, parentDepth: number) {
+  store.dispatch('addNode', { parentId, name: '新しい部署', depth: parentDepth + 1 })
+}
+// ノード編集
+function onUpdateNode(payload: { id: string, name: string, parentId: string | null, depth: number }) {
+  store.dispatch('updateNode', payload)
+}
+// ノード削除
+function onDeleteNode(nodeId: string) {
+  store.dispatch('deleteNode', nodeId)
+}
 </script>
 
 <script lang="ts">
@@ -87,14 +121,24 @@ export default {
             :key="d"
             :class="[
               { 'leaf-cell': isLeafRow[idx] === d },
-              { 'parent-cell': cell && isLeafRow[idx] !== d }
+              { 'parent-cell': cell && isLeafRow[idx] !== d },
+              { 'selected-cell': flatNodes[0 + idx]?.id === selectedNodeId }
             ]"
+            @click="onSelectNode(flatNodes[0 + idx]?.id)"
           >
             {{ cell || '-' }}
+            <button v-if="isLeafRow[idx] === d && flatNodes[0 + idx]" @click.stop="onAddChild(flatNodes[0 + idx].id, flatNodes[0 + idx].depth)">＋</button>
           </td>
         </tr>
       </tbody>
     </table>
+    <NodeEditPanel
+      v-if="selectedNode"
+      :node="selectedNode"
+      :allNodes="flatNodes"
+      @update="onUpdateNode"
+      @delete="onDeleteNode"
+    />
   </div>
 </template>
 
@@ -167,5 +211,9 @@ export default {
   color: #6b7685 !important;
   font-weight: 400;
   background: #fafdff;
+}
+.selected-cell {
+  background: #ffe6b3 !important;
+  border: 2px solid #ffb300;
 }
 </style> 
