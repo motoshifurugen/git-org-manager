@@ -3,7 +3,7 @@ import { defineProps, defineEmits } from 'vue'
 
 const props = defineProps<{
   show: boolean,
-  commitList: { id: string, message: string, author: string, created_at: string, tree_id: string }[]
+  commitList: { id: string, message: string, author: string, created_at: string, tree_id: string, tag_name?: string | null }[]
 }>()
 const emit = defineEmits(['apply', 'close'])
 </script>
@@ -16,9 +16,10 @@ const emit = defineEmits(['apply', 'close'])
         <table style="width:100%; border-collapse:collapse;">
           <thead>
             <tr style="background:#f6f7fa;">
-              <th style="padding:0.5em 0.7em; text-align:left;">日時</th>
-              <th style="padding:0.5em 0.7em; text-align:left;">メッセージ</th>
-              <th style="padding:0.5em 0.7em; text-align:left;">作成者</th>
+              <th style="padding:0.5em 0.7em; text-align:center;">日時</th>
+              <th style="padding:0.5em 0.7em; text-align:center;">メッセージ</th>
+              <th style="padding:0.5em 0.7em; text-align:center;">タグ</th>
+              <th style="padding:0.5em 0.7em; text-align:center;">作成者</th>
               <th style="padding:0.5em 0.7em;"></th>
             </tr>
           </thead>
@@ -26,6 +27,7 @@ const emit = defineEmits(['apply', 'close'])
             <tr v-for="c in props.commitList" :key="c.id" style="border-bottom:1px solid #e0e4ea;">
               <td style="padding:0.5em 0.7em; font-family:monospace;">{{ c.created_at }}</td>
               <td style="padding:0.5em 0.7em;">{{ c.message || '(メッセージなし)' }}</td>
+              <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace;">{{ c.tag_name || '' }}</td>
               <td style="padding:0.5em 0.7em;">{{ c.author }}</td>
               <td style="padding:0.5em 0.7em; text-align:right;">
                 <button class="history-apply-btn" @click="$emit('apply', c.id)">適用</button>

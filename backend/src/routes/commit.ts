@@ -12,7 +12,7 @@ router.get('/commits/latest', async (_, res) => {
 
 // スナップショット（コミット）作成API
 router.post('/commit', async (req, res) => {
-  const { author, message, nodes } = req.body;
+  const { author, message, nodes, parent_commit_id } = req.body;
   if (!author || !nodes) {
     return res.status(400).json({ error: 'author, nodesは必須です' });
   }
@@ -64,8 +64,8 @@ router.post('/commit', async (req, res) => {
     }
     // 4. org_commit の作成
     const commitResult = await client.query(
-      'INSERT INTO org_commit (tree_id, message, author) VALUES ($1, $2, $3) RETURNING id, created_at',
-      [tree_id, message || null, author]
+      'INSERT INTO org_commit (tree_id, message, author, parent_commit_id) VALUES ($1, $2, $3, $4) RETURNING id, created_at',
+      [tree_id, message || null, author, parent_commit_id || null]
     );
     await client.query('COMMIT');
     res.json({ success: true, commit_id: commitResult.rows[0].id, tree_id, created_at: commitResult.rows[0].created_at });
@@ -81,9 +81,10 @@ router.post('/commit', async (req, res) => {
 router.get('/commits', async (_, res) => {
   try {
     const result = await pool.query(
-      `SELECT id, message, author, created_at, tree_id
-       FROM org_commit
-       ORDER BY created_at DESC`
+      `SELECT c.id, c.message, c.author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
+       FROM org_commit c
+       LEFT JOIN org_tag t ON c.id = t.commit_id
+       ORDER BY c.created_at DESC`
     );
     res.json(result.rows);
   } catch (e: any) {

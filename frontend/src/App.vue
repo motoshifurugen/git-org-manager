@@ -22,7 +22,7 @@ const showTagModal = ref(false)
 const tagName = ref<string | undefined>(undefined)
 const tagInput = ref('')
 const isTagSubmitting = ref(false)
-const commitList = ref<{ id: string, message: string, author: string, created_at: string, tree_id: string }[]>([])
+const commitList = ref<{ id: string, message: string, author: string, created_at: string, tree_id: string, parent_commit_id: string | null }[]>([])
 const showHistoryModal = ref(false)
 const appliedCommitId = ref('')
 
@@ -103,9 +103,16 @@ async function fetchCommitList() {
 
 watch(commitId, (v) => { appliedCommitId.value = v })
 
+// parent_commit_idを辿って現在のappliedCommitIdから到達可能な履歴のみをリストアップ
 const filteredCommitList = computed(() => {
-  const idx = commitList.value.findIndex(c => c.id === appliedCommitId.value)
-  return idx === -1 ? commitList.value : commitList.value.slice(idx + 1)
+  const map = new Map(commitList.value.map(c => [c.id, c]))
+  const result = []
+  let cur = map.get(appliedCommitId.value)
+  while (cur) {
+    result.push(cur)
+    cur = cur.parent_commit_id ? map.get(cur.parent_commit_id) : undefined
+  }
+  return result
 })
 
 async function applyCommitToDraftById(commitId: string) {
@@ -169,7 +176,7 @@ function onCommitFromDiff() {
   showDiff.value = false
   commitMessage.value = ''
   const prevDraftNodes = [...store.state.draftNodes]
-  store.dispatch('commitDraft', { treeId: treeId.value, author: 'admin_user', message })
+  store.dispatch('commitDraft', { treeId: treeId.value, author: 'admin_user', message, parent_commit_id: appliedCommitId.value })
     .then(async (data: any) => {
       showToast('コミット完了: ' + data.commit_id, 'success')
       await fetchLatestTree()
