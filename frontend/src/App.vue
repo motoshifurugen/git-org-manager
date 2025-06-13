@@ -198,7 +198,8 @@ h1 {
   max-width: 90vw;
   position: relative;
 }
-.diff-added {
+.diff-added,
+.diff-deleted {
   background: #e6ffed !important;
   color: #237804 !important;
   border-radius: 4px;
@@ -210,11 +211,6 @@ h1 {
 .diff-deleted {
   background: #fff1f0 !important;
   color: #c41d7f !important;
-  border-radius: 4px;
-  margin-bottom: 0.3em;
-  padding: 0.2em 0.7em;
-  font-family: monospace;
-  text-align: left;
 }
 .diff-sign {
   font-weight: bold;
@@ -224,6 +220,15 @@ h1 {
 .modal-content ul {
   list-style: none;
   padding-left: 0;
+}
+.modal-content ul li {
+  margin-bottom: 1.2em;
+}
+.modal-content ul li:last-child {
+  margin-bottom: 0;
+}
+.modal-content ul li > .diff-deleted + .diff-added {
+  margin-top: 0.4em;
 }
 .diff-btn, .modal-content button {
   background: #347474;
@@ -249,6 +254,9 @@ h1 {
 .modal-content button:last-child:hover {
   background: #cfd4de;
   color: #2d3a4a !important;
+}
+.modal-content > div[v-if] {
+  margin-bottom: 1.5em;
 }
 </style>
 
