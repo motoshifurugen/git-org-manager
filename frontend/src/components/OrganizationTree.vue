@@ -98,6 +98,10 @@ function onUpdateNode(payload: { id: string, name: string, parentId: string | nu
 function onDeleteNode(nodeId: string) {
   store.dispatch('deleteNode', nodeId)
 }
+// モーダルを閉じる
+function onCloseModal() {
+  store.commit('selectNode', null)
+}
 </script>
 
 <script lang="ts">
@@ -132,13 +136,18 @@ export default {
         </tr>
       </tbody>
     </table>
-    <NodeEditPanel
-      v-if="selectedNode"
-      :node="selectedNode"
-      :allNodes="flatNodes"
-      @update="onUpdateNode"
-      @delete="onDeleteNode"
-    />
+    <!-- モーダル表示部分 -->
+    <div v-if="selectedNode" class="modal-overlay" @click.self="onCloseModal">
+      <div class="modal-content">
+        <button class="modal-close" @click="onCloseModal">×</button>
+        <NodeEditPanel
+          :node="selectedNode"
+          :allNodes="flatNodes"
+          @update="onUpdateNode"
+          @delete="onDeleteNode"
+        />
+      </div>
+    </div>
   </div>
 </template>
 
@@ -215,5 +224,37 @@ export default {
 .selected-cell {
   background: #ffe6b3 !important;
   border: 2px solid #ffb300;
+}
+.modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 100vh;
+  background: rgba(0,0,0,0.35);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 1000;
+}
+.modal-content {
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.18);
+  padding: 2em 2.5em 1.5em 2.5em;
+  min-width: 340px;
+  max-width: 90vw;
+  position: relative;
+}
+.modal-close {
+  position: absolute;
+  top: 0.7em;
+  right: 1em;
+  background: none;
+  border: none;
+  font-size: 1.7em;
+  color: #888;
+  cursor: pointer;
+  z-index: 10;
 }
 </style> 
