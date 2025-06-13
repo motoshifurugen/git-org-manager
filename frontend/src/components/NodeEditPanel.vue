@@ -6,6 +6,7 @@ const props = defineProps<{
   node: OrgNode
   allNodes: OrgNode[]
   maxDepth: number
+  isEdit: boolean
 }>()
 const emit = defineEmits(['update', 'delete'])
 
@@ -68,7 +69,7 @@ function onDelete() {
 
 <template>
   <div class="edit-panel">
-    <h3>ノード編集</h3>
+    <h3>{{ props.isEdit ? 'ノード編集' : 'ノード追加' }}</h3>
     <form @submit.prevent="onSubmit">
       <label>名称
         <input v-model="editName" required maxlength="50" />
@@ -93,59 +94,86 @@ function onDelete() {
 
 <style scoped>
 .edit-panel {
-  background: #f8fafc;
-  border: 1px solid #e0e4ea;
-  border-radius: 8px;
-  padding: 1.5em 1em;
-  margin-left: 2em;
-  min-width: 300px;
-  max-width: 350px;
-  float: left;
+  width: 100%;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 0;
+  background: none;
+  border: none;
+  border-radius: 0;
+  box-shadow: none;
+  margin: 0;
+}
+.edit-panel h3 {
+  color: #222;
+  font-size: 1.25em;
+  font-weight: 700;
+  margin-bottom: 1.5em;
+  letter-spacing: 0.02em;
+  text-align: center;
 }
 label {
   display: block;
-  margin-bottom: 1em;
-  font-size: 0.95em;
+  margin-bottom: 1.1em;
+  font-size: 0.97em;
+  color: #444;
+  font-weight: 500;
 }
 input, select {
   width: 100%;
-  margin-top: 0.2em;
-  padding: 0.4em;
-  border-radius: 4px;
-  border: 1px solid #c0c6d1;
+  margin-top: 0.3em;
+  padding: 0.55em 0.9em;
+  border-radius: 6px;
+  border: 1.2px solid #d0d6e1;
   font-size: 1em;
+  background: #f8fafc;
+  color: #222;
+  transition: border 0.2s;
+  box-sizing: border-box;
+}
+input:focus, select:focus {
+  outline: none;
+  border-color: #347474;
+  background: #fff;
 }
 .btns {
   display: flex;
   gap: 1em;
+  justify-content: center;
+  margin-top: 1.5em;
 }
 button {
-  padding: 0.5em 1.2em;
-  border-radius: 6px;
+  padding: 0.6em 2.2em;
+  border-radius: 8px;
   border: none;
   background: #347474;
   color: #fff;
   font-weight: bold;
+  font-size: 1em;
   cursor: pointer;
-  transition: background 0.2s;
+  transition: background 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(52,116,116,0.07);
 }
 button:disabled {
   background: #b0b8c9;
   cursor: not-allowed;
+  box-shadow: none;
 }
 .error {
   color: #d00;
-  font-size: 0.85em;
+  font-size: 0.92em;
   margin-left: 0.5em;
 }
 .parent-name {
-  padding: 0.3em 0.5em;
+  padding: 0.5em 0.7em;
   background: #f4f4f4;
-  border-radius: 4px;
+  border-radius: 6px;
   color: #555;
   margin-top: 0.2em;
   margin-bottom: 0.5em;
-  font-size: 0.97em;
+  font-size: 1em;
+  text-align: center;
 }
 </style>
 

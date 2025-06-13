@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, defineExpose, computed } from 'vue'
+import { defineProps, defineExpose, computed, ref } from 'vue'
 import { useStore } from 'vuex'
 import NodeEditPanel from './NodeEditPanel.vue'
 import type { OrgNode } from '../store'
@@ -27,6 +27,9 @@ const flatNodes = computed(() => flatten(draftNodes.value.length ? draftNodes.va
 
 // 選択中ノード
 const selectedNode = computed(() => flatNodes.value.find(n => n.id === selectedNodeId.value) || null)
+
+const modalNode = ref<OrgNode | null>(null)
+const isEdit = ref(true)
 
 defineExpose({})
 
@@ -82,15 +85,34 @@ const isLeafRow = computed(() => {
 
 // ノード選択
 function onSelectNode(nodeId: string) {
+  const node = flatNodes.value.find(n => n.id === nodeId)
+  if (node) {
+    modalNode.value = { ...node }
+    isEdit.value = true
+  }
   store.commit('selectNode', nodeId)
 }
 // ノード追加
 function onAddChild(parentId: string, parentDepth: number) {
-  store.dispatch('addNode', { parentId, name: '新しい部署', depth: parentDepth + 1 })
+  const tmpId = 'tmp-' + Math.random().toString(36).slice(2, 9)
+  modalNode.value = {
+    id: tmpId,
+    name: '',
+    parentId: parentId,
+    depth: parentDepth + 1,
+    children: []
+  }
+  isEdit.value = false
+  store.commit('selectNode', tmpId)
 }
 // ノード編集
 function onUpdateNode(payload: { id: string, name: string, parentId: string | null, depth: number }) {
-  store.dispatch('updateNode', payload)
+  if (!isEdit.value) {
+    store.dispatch('addNode', payload)
+  } else {
+    store.dispatch('updateNode', payload)
+  }
+  onCloseModal()
 }
 // ノード削除
 function onDeleteNode(nodeId: string) {
@@ -98,6 +120,7 @@ function onDeleteNode(nodeId: string) {
 }
 // モーダルを閉じる
 function onCloseModal() {
+  modalNode.value = null
   store.commit('selectNode', null)
 }
 </script>
@@ -137,13 +160,14 @@ export default {
       </tbody>
     </table>
     <!-- モーダル表示部分 -->
-    <div v-if="selectedNode" class="modal-overlay" @click.self="onCloseModal">
+    <div v-if="modalNode" class="modal-overlay" @click.self="onCloseModal">
       <div class="modal-content">
         <button class="modal-close" @click="onCloseModal">×</button>
         <NodeEditPanel
-          :node="selectedNode"
+          :node="modalNode"
           :allNodes="flatNodes"
           :maxDepth="maxDepth"
+          :isEdit="isEdit"
           @update="onUpdateNode"
           @delete="onDeleteNode"
         />
