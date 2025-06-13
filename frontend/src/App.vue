@@ -11,6 +11,7 @@ const loading = ref(true)
 const error = ref('')
 const showDiff = ref(false)
 const diffResult = ref<{ added: any[]; updated: any[]; deleted: any[] }>({ added: [], updated: [], deleted: [] })
+const baseFlat = computed(() => flatten(treeNodes.value))
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -82,6 +83,23 @@ function onCommitFromDiff() {
       alert('コミット失敗: ' + (e.message || e))
     })
 }
+
+function getNodePath(node: any, baseFlatArr: any[]): string {
+  const path: string[] = []
+  let current = node
+  const map = baseFlatArr.reduce((acc: Record<string, any>, n: any) => { acc[n.id] = n; return acc }, {} as Record<string, any>)
+  while (current) {
+    path.unshift(current.name)
+    current = current.parentId ? map[current.parentId] : null
+  }
+  return path.join(' / ')
+}
+
+function getOldNode(newNode: any) {
+  // baseNodesはflatten済み
+  const baseFlat = flatten(treeNodes.value)
+  return baseFlat.find((n: any) => n.id === newNode.id) || {}
+}
 </script>
 
 <template>
@@ -89,30 +107,41 @@ function onCommitFromDiff() {
     <h1>組織構造ツリー</h1>
     <div style="display: flex; align-items: center; gap: 1em;">
       <DraftStateBar :hasDraft="hasDraft" />
-      <button v-if="hasDraft" @click="onDiff">diff</button>
+      <button v-if="hasDraft" class="diff-btn" @click="onDiff">diff</button>
     </div>
     <div v-if="loading">読み込み中...</div>
     <div v-else-if="error">エラー: {{ error }}</div>
     <OrganizationTree v-else :nodes="treeNodes" :maxDepth="5" />
     <div v-if="showDiff" class="modal-overlay" @click.self="showDiff = false">
       <div class="modal-content">
-        <h2>差分（draft vs 最新コミット）</h2>
+        <h2>差分</h2>
         <div v-if="diffResult.added.length">
           <h3>追加</h3>
           <ul>
-            <li v-for="n in diffResult.added" :key="'a'+n.id">{{ n.name }}（階層:{{ n.depth }}）</li>
-          </ul>
-        </div>
-        <div v-if="diffResult.updated.length">
-          <h3>変更</h3>
-          <ul>
-            <li v-for="n in diffResult.updated" :key="'u'+n.id">{{ n.name }}（階層:{{ n.depth }}）</li>
+            <li v-for="n in diffResult.added" :key="'a'+n.id" class="diff-added">
+              <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
+            </li>
           </ul>
         </div>
         <div v-if="diffResult.deleted.length">
           <h3>削除</h3>
           <ul>
-            <li v-for="n in diffResult.deleted" :key="'d'+n.id">{{ n.name }}（階層:{{ n.depth }}）</li>
+            <li v-for="n in diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
+              <span class="diff-sign">ー</span>{{ getNodePath(n, baseFlat) }}
+            </li>
+          </ul>
+        </div>
+        <div v-if="diffResult.updated.length">
+          <h3>変更</h3>
+          <ul>
+            <li v-for="n in diffResult.updated" :key="'u'+n.id">
+              <div class="diff-deleted">
+                <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), baseFlat) }}
+              </div>
+              <div class="diff-added">
+                <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
+              </div>
+            </li>
           </ul>
         </div>
         <button @click="onCommitFromDiff">コミット</button>
@@ -147,5 +176,110 @@ h1 {
   min-width: 340px;
   max-width: 90vw;
   position: relative;
+}
+.diff-added {
+  background: #e6ffed !important;
+  color: #237804 !important;
+  border-radius: 4px;
+  margin-bottom: 0.3em;
+  padding: 0.2em 0.7em;
+  font-family: monospace;
+  text-align: left;
+}
+.diff-deleted {
+  background: #fff1f0 !important;
+  color: #c41d7f !important;
+  border-radius: 4px;
+  margin-bottom: 0.3em;
+  padding: 0.2em 0.7em;
+  font-family: monospace;
+  text-align: left;
+}
+.diff-sign {
+  font-weight: bold;
+  margin-right: 0.5em;
+  font-size: 1.1em;
+}
+.modal-content ul {
+  list-style: none;
+  padding-left: 0;
+}
+.diff-btn, .modal-content button {
+  background: #347474;
+  color: #fff !important;
+  border: none;
+  border-radius: 6px;
+  padding: 0.5em 1.5em;
+  font-weight: 600;
+  font-size: 1em;
+  margin: 0.5em 0.5em 0.5em 0;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(52,116,116,0.07);
+}
+.diff-btn:hover, .modal-content button:hover {
+  background: #255a5a;
+  color: #fff !important;
+}
+.modal-content button:last-child {
+  background: #e0e4ea;
+  color: #2d3a4a !important;
+}
+.modal-content button:last-child:hover {
+  background: #cfd4de;
+  color: #2d3a4a !important;
+}
+</style>
+
+<style>
+body {
+  background: #f6f7fa !important;
+  color: #2d3a4a !important;
+}
+
+#app, html {
+  background: #f6f7fa !important;
+  color: #2d3a4a !important;
+}
+
+/* 強制的にlight themeを維持 */
+* {
+  background-color: inherit;
+  color: inherit;
+  box-shadow: none;
+}
+
+.tree-table, .modal-content, .edit-panel, .draft-bar {
+  background: #fcfdff !important;
+  border-radius: 10px;
+  box-shadow: 0 2px 8px rgba(60,60,60,0.06);
+}
+
+.tree-table th {
+  color: #347474;
+}
+
+.tree-table td {
+  background: #fafdff !important;
+  color: #2d3a4a !important;
+}
+
+.leaf-cell {
+  background: #e6f7ff !important;
+  color: #1a3a6b !important;
+}
+
+.parent-cell {
+  background: #fafdff !important;
+  color: #6b7685 !important;
+}
+
+.selected-cell {
+  background: #ffe6b3 !important;
+  border: 2px solid #ffb300;
+}
+
+.modal-overlay {
+  background: rgba(0,0,0,0.18) !important;
 }
 </style>
