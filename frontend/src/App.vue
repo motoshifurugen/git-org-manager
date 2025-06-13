@@ -277,6 +277,14 @@ watch(showTagModal, (v) => {
     tagInput.value = tagName.value || ''
   }
 })
+
+function onClearDraft() {
+  store.commit('setDraftNodes', [])
+  fetchLatestTree()
+  fetchCommitList()
+  appliedCommitId.value = commitId.value
+  showToast('ドラフトをクリアしました', 'success')
+}
 </script>
 
 <template>
@@ -295,6 +303,7 @@ watch(showTagModal, (v) => {
         :commitId="commitId"
         @diff="onDiff"
         @edit-tag="openTagModal"
+        @clear="onClearDraft"
       />
       <button
         @click="showHistoryModal = true"
