@@ -15,6 +15,7 @@ const diffResult = ref<{ added: any[]; updated: any[]; deleted: any[] }>({ added
 const baseFlat = computed(() => flatten(treeNodes.value))
 const toast = ref<{ message: string; type: 'success' | 'error' } | null>(null)
 const commitMessage = ref('')
+const isCommitting = ref(false)
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -123,15 +124,21 @@ function onCommitFromDiff() {
     showToast('コミットメッセージを入力してください', 'error')
     return
   }
+  isCommitting.value = true
+  // 楽観的UI: 先にUIを更新
+  showDiff.value = false
+  commitMessage.value = ''
+  const prevDraftNodes = [...store.state.draftNodes]
   store.dispatch('commitDraft', { treeId: treeId.value, author: 'admin_user', message })
     .then(async (data: any) => {
       showToast('コミット完了: ' + data.commit_id, 'success')
-      showDiff.value = false
-      commitMessage.value = ''
       await fetchLatestTree()
     })
     .catch((e: any) => {
+      // ロールバック
+      store.commit('setDraftNodes', prevDraftNodes)
       showToast('コミット失敗: ' + (e.message || e), 'error')
+      isCommitting.value = false
     })
 }
 
@@ -163,13 +170,13 @@ function getOldNode(newNode: any) {
     />
     <h1>組織構造ツリー</h1>
     <div style="display: flex; align-items: center; gap: 1em;">
-      <DraftStateBar :hasDraft="hasDraft" @diff="onDiff" />
+      <DraftStateBar :hasDraft="!isCommitting && hasDraft" @diff="onDiff" />
     </div>
     <div v-if="loading">読み込み中...</div>
     <div v-else-if="error">エラー: {{ error }}</div>
     <OrganizationTree :nodes="displayNodes" :maxDepth="5" />
-    <div v-if="showDiff" class="modal-overlay" @click.self="showDiff = false">
-      <div class="modal-content">
+    <div v-if="showDiff" class="modal-overlay" @click.self="isCommitting ? null : showDiff = false">
+      <div class="modal-content" style="position:relative;">
         <h2>差分</h2>
         <div v-if="diffResult.added.length">
           <h3>追加</h3>
@@ -202,10 +209,16 @@ function getOldNode(newNode: any) {
         </div>
         <div style="margin-bottom: 1.2em;">
           <label style="font-weight: bold;">コミットメッセージ</label>
-          <input v-model="commitMessage" maxlength="100" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="コミット内容を入力" />
+          <input v-model="commitMessage" maxlength="100" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="コミット内容を入力" :disabled="isCommitting" />
         </div>
-        <button @click="onCommitFromDiff">コミット</button>
-        <button @click="showDiff = false">閉じる</button>
+        <button @click="onCommitFromDiff" :disabled="isCommitting">
+          <span v-if="isCommitting" class="spinner" style="margin-right:0.7em;"></span>
+          コミット
+        </button>
+        <button @click="showDiff = false" :disabled="isCommitting">閉じる</button>
+        <div v-if="isCommitting" class="modal-committing-overlay">
+          <span class="spinner"></span>
+        </div>
       </div>
     </div>
   </div>
@@ -296,6 +309,29 @@ h1 {
 }
 .modal-content > div[v-if] {
   margin-bottom: 1.5em;
+}
+.modal-committing-overlay {
+  position: absolute;
+  top: 0; left: 0; right: 0; bottom: 0;
+  background: rgba(255,255,255,0.7);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 10;
+  border-radius: 12px;
+}
+.spinner {
+  width: 1.3em;
+  height: 1.3em;
+  border: 3px solid #347474;
+  border-top: 3px solid #e0e4ea;
+  border-radius: 50%;
+  animation: spin 0.7s linear infinite;
+  display: inline-block;
+}
+@keyframes spin {
+  0% { transform: rotate(0deg); }
+  100% { transform: rotate(360deg); }
 }
 </style>
 
