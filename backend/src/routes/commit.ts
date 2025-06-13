@@ -77,4 +77,18 @@ router.post('/commit', async (req, res) => {
   }
 });
 
+// コミット一覧取得API
+router.get('/commits', async (_, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT id, message, author, created_at, tree_id
+       FROM org_commit
+       ORDER BY created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: 'コミット一覧取得に失敗しました', detail: e.message });
+  }
+});
+
 export default router 

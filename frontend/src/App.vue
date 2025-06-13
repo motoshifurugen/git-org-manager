@@ -4,6 +4,7 @@ import { useStore } from 'vuex'
 import OrganizationTree from './components/OrganizationTree.vue'
 import DraftStateBar from './components/DraftStateBar.vue'
 import ToastMessage from './components/ToastMessage.vue'
+import CommitHistoryModal from './components/CommitHistoryModal.vue'
 
 const store = useStore()
 const treeId = ref('')
@@ -21,6 +22,9 @@ const showTagModal = ref(false)
 const tagName = ref<string | undefined>(undefined)
 const tagInput = ref('')
 const isTagSubmitting = ref(false)
+const commitList = ref<{ id: string, message: string, author: string, created_at: string, tree_id: string }[]>([])
+const showHistoryModal = ref(false)
+const appliedCommitId = ref('')
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -88,7 +92,37 @@ async function fetchLatestTree() {
   }
 }
 
-onMounted(fetchLatestTree)
+async function fetchCommitList() {
+  try {
+    const res = await fetch('http://localhost:3001/api/commits')
+    commitList.value = await res.json()
+  } catch (e) {
+    // 必要ならエラー処理
+  }
+}
+
+watch(commitId, (v) => { appliedCommitId.value = v })
+
+const filteredCommitList = computed(() => {
+  const idx = commitList.value.findIndex(c => c.id === appliedCommitId.value)
+  return idx === -1 ? commitList.value : commitList.value.slice(idx + 1)
+})
+
+async function applyCommitToDraftById(commitId: string) {
+  const commit = commitList.value.find(c => c.id === commitId)
+  if (!commit) return
+  const treeRes = await fetch(`http://localhost:3001/api/trees/${commit.tree_id}`)
+  const treeData = await treeRes.json()
+  store.commit('setDraftNodes', flatten(treeData.nodes))
+  showToast('選択したコミット内容をドラフトに適用しました', 'success')
+  appliedCommitId.value = commitId
+  showHistoryModal.value = false
+}
+
+onMounted(() => {
+  fetchLatestTree()
+  fetchCommitList()
+})
 
 function flatten(nodes: any[], parentId: string | null = null): any[] {
   const res: any[] = []
@@ -254,7 +288,7 @@ watch(showTagModal, (v) => {
       @close="toast = null"
     />
     <h1>組織構造ツリー</h1>
-    <div style="display: flex; align-items: center; gap: 1em; margin-bottom: 0.7em;">
+    <div style="display: flex; align-items: center; gap: 1em; margin-bottom: 0.7em; justify-content: space-between;">
       <DraftStateBar
         :hasDraft="!isCommitting && hasDraft"
         :tagName="tagName"
@@ -262,7 +296,20 @@ watch(showTagModal, (v) => {
         @diff="onDiff"
         @edit-tag="openTagModal"
       />
+      <button
+        @click="showHistoryModal = true"
+        title="コミット履歴を表示"
+        style="background: none; border: none; cursor: pointer; font-size: 1.7em; margin-left: auto; color: #347474; display: flex; align-items: center;"
+      >
+        <span style="font-size:1.3em;">🗂️</span>
+      </button>
     </div>
+    <CommitHistoryModal
+      :show="showHistoryModal"
+      :commitList="filteredCommitList"
+      @apply="applyCommitToDraftById"
+      @close="showHistoryModal = false"
+    />
     <div v-if="showTagModal" class="modal-overlay" @click.self="closeTagModal">
       <div class="modal-content">
         <h2>タグ付与</h2>
@@ -440,6 +487,15 @@ h1 {
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+.modal-content .apply-btn {
+  background: #347474;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.4em 1.2em;
+  font-weight: bold;
+  cursor: pointer;
 }
 </style>
 
