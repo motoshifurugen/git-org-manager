@@ -12,7 +12,9 @@ const emit = defineEmits(['commit', 'diff', 'edit-tag'])
     </template>
     <template v-else>
       <button class="tag-display-btn" @click="$emit('edit-tag')" title="タグを付与・編集">
-        <span class="tag-icon" style="font-size:1.2em;">🏷️</span>
+        <span class="tag-icon" style="font-size:1.2em;">
+          {{ (props.tagName && props.tagName.length > 0) ? '🏷️' : '📝' }}
+        </span>
         <span class="tag-label" style="font-family:monospace; font-size:1em;">
           {{ (props.tagName && props.tagName.length > 0) ? props.tagName : props.commitId }}
         </span>
