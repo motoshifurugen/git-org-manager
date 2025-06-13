@@ -151,9 +151,10 @@ export default {
             ]"
             @click="onSelectNode(leafNodeId)"
           >
-            {{ cell || '-' }}
-            <template v-if="isLeafRow[idx] === d && leafNodeId">
-              <button class="add-btn" @click.stop="onAddChild(leafNodeId, d + 1 - 1)">＋</button>
+            {{ cell || '' }}
+            <!-- 末端組織の下の空セルに＋ボタンを表示（第5階層には出さない） -->
+            <template v-if="cell === null && d === isLeafRow[idx] + 1 && d < maxDepth">
+              <button class="add-btn" @click.stop="onAddChild(leafNodeId, d)">＋</button>
             </template>
           </td>
         </tr>
@@ -215,6 +216,7 @@ export default {
   background: #fafdff;
   transition: background 0.2s;
   border-bottom: 1.2px solid #e0e4ea;
+  cursor: pointer;
 }
 .tree-table-row {
   /* box-shadow: 0 1px 4px rgba(60,60,60,0.04);
