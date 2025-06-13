@@ -37,12 +37,6 @@ const parentCandidates = computed(() =>
   props.allNodes.filter(n => n.id !== props.node.id)
 )
 
-const parentNodeName = computed(() => {
-  if (!editParentId.value) return '（ルート）'
-  const parent = props.allNodes.find(n => n.id === editParentId.value)
-  return parent ? parent.name : '（不明）'
-})
-
 const nameError = computed(() => {
   if (!editName.value) return '名称は必須です'
   if (editName.value.length > 50) return '50文字以内で入力してください'
@@ -86,7 +80,7 @@ function onDelete() {
       </label>
       <div class="btns">
         <button type="submit" :disabled="!!nameError || !!levelError">保存</button>
-        <button type="button" @click="onDelete">削除</button>
+        <button v-if="isEdit" type="button" @click="onDelete">削除</button>
       </div>
     </form>
   </div>

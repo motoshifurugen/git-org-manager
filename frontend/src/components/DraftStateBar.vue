@@ -1,12 +1,18 @@
 <script setup lang="ts">
 const props = defineProps<{ hasDraft: boolean }>()
-const emit = defineEmits(['commit'])
+const emit = defineEmits(['commit', 'diff'])
 </script>
 
 <template>
-  <div v-if="hasDraft" class="draft-bar">
-    <span class="dot">●</span> 未コミットの変更があります
-    <button @click="$emit('commit')">コミット</button>
+  <div class="draft-bar" :class="{ 'no-draft': !props.hasDraft }">
+    <span class="dot">●</span>
+    <template v-if="props.hasDraft">
+      未コミットの変更があります
+      <button @click="$emit('diff')">diff</button>
+    </template>
+    <template v-else>
+      未コミットの変更はありません
+    </template>
   </div>
 </template>
 
@@ -21,6 +27,11 @@ const emit = defineEmits(['commit'])
   display: flex;
   align-items: center;
   gap: 1em;
+}
+.draft-bar.no-draft {
+  background: #f6f7fa;
+  border: 1px solid #e0e4ea;
+  color: #888;
 }
 .dot {
   color: #faad14;

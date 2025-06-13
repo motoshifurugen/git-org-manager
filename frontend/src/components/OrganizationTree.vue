@@ -11,7 +11,6 @@ const store = useStore()
 
 // ノード選択状態
 const selectedNodeId = computed(() => store.state.selectedNodeId)
-const draftNodes = computed(() => store.state.draftNodes)
 
 // ノードリストをフラット化
 function flatten(nodes: OrgNode[], parentId: string | null = null): OrgNode[] {
@@ -23,40 +22,22 @@ function flatten(nodes: OrgNode[], parentId: string | null = null): OrgNode[] {
   nodes.forEach(n => dfs(n, parentId))
   return res
 }
-const flatNodes = computed(() => flatten(draftNodes.value.length ? draftNodes.value : props.nodes))
-
-// 選択中ノード
-const selectedNode = computed(() => flatNodes.value.find(n => n.id === selectedNodeId.value) || null)
+const flatNodes = computed(() => flatten(props.nodes))
 
 const modalNode = ref<OrgNode | null>(null)
 const isEdit = ref(true)
 
 defineExpose({})
 
-// 指定ノード配下で各階層のノードをリスト化
-function getRowForNode(node: OrgNode, maxDepth: number): (string | null)[] {
-  const row = Array(maxDepth).fill(null)
-  let current: OrgNode | undefined = node
-  while (current && current.depth <= maxDepth) {
-    row[current.depth - 1] = current.name
-    if (current.children && current.children.length > 0) {
-      current = current.children[0]
-    } else {
-      break
-    }
-  }
-  return row
-}
-
 // 全てのルートから、各パスごとに行を作る
-function getAllRows(nodes: OrgNode[], maxDepth: number): { row: (string | null)[], leafNodeId: string }[] {
-  const rows: { row: (string | null)[], leafNodeId: string }[] = []
+function getAllRows(nodes: OrgNode[], maxDepth: number): { row: (string | null)[], nodeId: string, isLeaf: boolean }[] {
+  const rows: { row: (string | null)[], nodeId: string, isLeaf: boolean }[] = []
   function dfs(node: OrgNode, path: (string | null)[]) {
     const newPath = [...path]
     newPath[node.depth - 1] = node.name
-    if (!node.children || node.children.length === 0) {
-      rows.push({ row: newPath, leafNodeId: node.id })
-    } else {
+    const isLeaf = !node.children || node.children.length === 0
+    rows.push({ row: newPath, nodeId: node.id, isLeaf })
+    if (node.children && node.children.length > 0) {
       for (const child of node.children) {
         dfs(child, newPath)
       }
@@ -69,10 +50,10 @@ function getAllRows(nodes: OrgNode[], maxDepth: number): { row: (string | null)[
   return rows
 }
 
-const tableRows = computed(() => getAllRows(flatNodes.value.filter(n => !n.parentId), maxDepth))
+const tableRows = computed(() => getAllRows(props.nodes, maxDepth))
 
-// 末端組織（リーフノード）かどうかを判定する配列を作成
-const isLeafRow = computed(() => {
+// その行のノードのdepthを返す
+const nodeDepths = computed(() => {
   return tableRows.value.map(({ row }) => {
     for (let i = maxDepth - 1; i >= 0; i--) {
       if (row[i] !== null) {
@@ -117,6 +98,7 @@ function onUpdateNode(payload: { id: string, name: string, parentId: string | nu
 // ノード削除
 function onDeleteNode(nodeId: string) {
   store.dispatch('deleteNode', nodeId)
+  onCloseModal()
 }
 // モーダルを閉じる
 function onCloseModal() {
@@ -140,21 +122,21 @@ export default {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="({ row, leafNodeId }, idx) in tableRows" :key="idx" class="tree-table-row">
+        <tr v-for="({ row, nodeId }, idx) in tableRows" :key="nodeId" class="tree-table-row">
           <td
             v-for="(cell, d) in row"
             :key="d"
             :class="[
-              { 'leaf-cell': isLeafRow[idx] === d },
-              { 'parent-cell': cell && isLeafRow[idx] !== d },
-              { 'selected-cell': leafNodeId === selectedNodeId }
+              { 'leaf-cell': nodeDepths[idx] === d },
+              { 'parent-cell': cell && nodeDepths[idx] !== d },
+              { 'selected-cell': nodeId === selectedNodeId }
             ]"
-            @click="onSelectNode(leafNodeId)"
+            @click="onSelectNode(nodeId)"
           >
             {{ cell || '' }}
-            <!-- 末端組織の下の空セルに＋ボタンを表示（第5階層には出さない） -->
-            <template v-if="cell === null && d === isLeafRow[idx] + 1 && d < maxDepth">
-              <button class="add-btn" @click.stop="onAddChild(leafNodeId, d)">＋</button>
+            <!-- 末端でなくても第5階層以外は＋ボタンを表示 -->
+            <template v-if="cell === null && d === nodeDepths[idx] + 1 && d < maxDepth">
+              <button class="add-btn" @click.stop="onAddChild(nodeId, d)">＋</button>
             </template>
           </td>
         </tr>
@@ -217,15 +199,6 @@ export default {
   transition: background 0.2s;
   border-bottom: 1.2px solid #e0e4ea;
   cursor: pointer;
-}
-.tree-table-row {
-  /* box-shadow: 0 1px 4px rgba(60,60,60,0.04);
-  background: #fafdff;
-  margin-bottom: 0.5em;
-  overflow: hidden;
-  border-radius: 8px;
-  display: table-row;
-  border-bottom: 2.5px solid #222; */
 }
 .tree-table-row td:first-child {
   border-top-left-radius: 8px;
