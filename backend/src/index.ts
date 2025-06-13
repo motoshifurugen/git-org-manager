@@ -2,6 +2,7 @@
 import express from 'express'
 import cors from 'cors'
 import pool from './db'
+import crypto from 'crypto'
 
 const app = express()
 app.use(cors())
@@ -57,6 +58,55 @@ app.get('/api/tags/:id', async (req, res) => {
     res.json(result.rows[0])
   } catch (e: any) {
     res.status(500).json({ error: 'failed to fetch tag', detail: e.message })
+  }
+})
+
+// ノード追加API
+app.post('/api/org-nodes', async (req, res) => {
+  const { tree_id, name, level, parent_node_id } = req.body
+  if (!tree_id || !name || typeof level !== 'number') {
+    return res.status(400).json({ error: 'tree_id, name, levelは必須です' })
+  }
+  try {
+    // hash生成
+    const parentHashResult = parent_node_id
+      ? await pool.query('SELECT hash FROM org_node WHERE id = $1', [parent_node_id])
+      : { rows: [{ hash: null }] }
+    const parent_hash = parentHashResult.rows[0]?.hash || null
+    const hash = crypto.createHash('sha256').update(`${name}-${level}-${parent_hash ?? ''}`).digest('hex')
+
+    // org_node存在チェック
+    let nodeResult = await pool.query('SELECT * FROM org_node WHERE hash = $1', [hash])
+    let node
+    if (nodeResult.rows.length > 0) {
+      node = nodeResult.rows[0]
+    } else {
+      // 新規作成
+      nodeResult = await pool.query(
+        'INSERT INTO org_node (name, depth, parent_hash, hash) VALUES ($1, $2, $3, $4) RETURNING *',
+        [name, level, parent_hash, hash]
+      )
+      node = nodeResult.rows[0]
+    }
+
+    // org_tree_node登録（重複は無視）
+    let linkResult
+    try {
+      linkResult = await pool.query(
+        'INSERT INTO org_tree_node (tree_id, node_id, parent_id) VALUES ($1, $2, $3) RETURNING *',
+        [tree_id, node.id, parent_node_id]
+      )
+    } catch (e: any) {
+      // 既に存在する場合は取得
+      linkResult = await pool.query(
+        'SELECT * FROM org_tree_node WHERE tree_id = $1 AND node_id = $2',
+        [tree_id, node.id]
+      )
+    }
+    const link = linkResult.rows[0]
+    res.json({ node, link })
+  } catch (e: any) {
+    res.status(500).json({ error: 'failed to add org node', detail: e.message })
   }
 })
 
