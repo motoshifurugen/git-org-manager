@@ -31,8 +31,16 @@ function unflatten(nodes: any[]): any[] {
       nodeMap[n.parentId].children.push(nodeMap[n.id])
     }
   })
+  // 各childrenをname昇順でソート
+  Object.values(nodeMap).forEach((n: any) => {
+    if (n.children && n.children.length > 0) {
+      n.children.sort((a: any, b: any) => a.name.localeCompare(b.name, 'ja'))
+    }
+  })
   // parentIdがnull、またはdraftNodes内に親がいないものだけをルートに
   const roots = nodes.filter(n => !n.parentId || !nodeMap[n.parentId]).map(n => nodeMap[n.id])
+  // ルートもname昇順でソート
+  roots.sort((a: any, b: any) => a.name.localeCompare(b.name, 'ja'))
   return roots
 }
 

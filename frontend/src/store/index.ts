@@ -61,12 +61,12 @@ export default createStore({
       commit('setDraftNodes', nodes)
       if (state.selectedNodeId === nodeId) commit('selectNode', null)
     },
-    commitDraft({ commit }: any, { treeId, author, message }: { treeId: string, author: string, message?: string }) {
+    commitDraft({ commit, state }: any, { treeId, author, message }: { treeId: string, author: string, message?: string }) {
       // API保存処理
       return fetch('http://localhost:3001/api/commit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tree_id: treeId, author, message })
+        body: JSON.stringify({ tree_id: treeId, author, message, nodes: state.draftNodes })
       })
         .then(res => {
           if (!res.ok) throw new Error('コミットAPI失敗')
