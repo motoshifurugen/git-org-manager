@@ -98,14 +98,14 @@ router.delete('/org-nodes/:tree_node_id', async (req, res) => {
     return res.status(400).json({ error: 'tree_node_idは必須です' })
   }
   try {
-    const linkResult = await pool.query('SELECT * FROM org_tree_node WHERE ctid = $1', [tree_node_id])
+    const linkResult = await pool.query('SELECT * FROM org_tree_node WHERE id = $1', [tree_node_id])
     if (linkResult.rows.length === 0) {
       return res.status(404).json({ error: 'tree_node_idが見つかりません' })
     }
     const treeNode = linkResult.rows[0]
     const nodeResult = await pool.query('SELECT id, name, depth FROM org_node WHERE id = $1', [treeNode.node_id])
     const node = nodeResult.rows[0]
-    await pool.query('DELETE FROM org_tree_node WHERE ctid = $1', [tree_node_id])
+    await pool.query('DELETE FROM org_tree_node WHERE id = $1', [tree_node_id])
     await pool.query('UPDATE org_tree SET updated_at = NOW() WHERE id = $1', [treeNode.tree_id])
     res.json({
       node: {
