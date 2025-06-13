@@ -110,6 +110,60 @@ app.post('/api/org-nodes', async (req, res) => {
   }
 })
 
+// ノード編集API
+app.patch('/api/org-nodes/edit', async (req, res) => {
+  const { tree_id, node_id, new_name, new_parent_node_id, new_level } = req.body
+  if (!tree_id || !node_id || !new_name) {
+    return res.status(400).json({ error: 'tree_id, node_id, new_nameは必須です' })
+  }
+  try {
+    // 1. parent_hash取得
+    let parent_hash = null
+    if (new_parent_node_id) {
+      const parentHashResult = await pool.query('SELECT hash FROM org_node WHERE id = $1', [new_parent_node_id])
+      parent_hash = parentHashResult.rows[0]?.hash || null
+    }
+    // 2. level決定
+    let level = new_level
+    if (typeof level !== 'number') {
+      // 現在のノードのdepthを流用
+      const nodeResult = await pool.query('SELECT depth FROM org_node WHERE id = $1', [node_id])
+      level = nodeResult.rows[0]?.depth
+    }
+    // 3. hash生成
+    const hash = crypto.createHash('sha256').update(`${new_name}-${level}-${parent_hash ?? ''}`).digest('hex')
+    // 4. org_node存在チェック
+    let nodeResult = await pool.query('SELECT * FROM org_node WHERE hash = $1', [hash])
+    let newNode
+    let updated = true
+    if (nodeResult.rows.length > 0) {
+      newNode = nodeResult.rows[0]
+      // 変更なし判定
+      if (newNode.id === node_id) {
+        updated = false
+      }
+    } else {
+      // 新規作成
+      nodeResult = await pool.query(
+        'INSERT INTO org_node (name, depth, parent_hash, hash) VALUES ($1, $2, $3, $4) RETURNING *',
+        [new_name, level, parent_hash, hash]
+      )
+      newNode = nodeResult.rows[0]
+    }
+    // 5. org_tree_nodeの置換（node_id, parent_id更新）
+    if (updated) {
+      // 既存リンクを新ノードに置換
+      await pool.query(
+        'UPDATE org_tree_node SET node_id = $1, parent_id = $2 WHERE tree_id = $3 AND node_id = $4',
+        [newNode.id, new_parent_node_id, tree_id, node_id]
+      )
+    }
+    res.json({ status: 'success', new_node_id: newNode.id, updated })
+  } catch (e: any) {
+    res.status(500).json({ error: 'failed to edit org node', detail: e.message })
+  }
+})
+
 app.listen(3001, () => {
   console.log('Server is running at http://localhost:3001')
 })
