@@ -45,6 +45,21 @@ app.get('/api/trees/:id', async (req, res) => {
   }
 })
 
+app.get('/api/commits/latest', async (_, res) => {
+  const result = await pool.query('SELECT * FROM org_commit ORDER BY created_at DESC LIMIT 1')
+  res.json(result.rows[0])
+})
+
+app.get('/api/tags/:id', async (req, res) => {
+  const commitId = req.params.id
+  try {
+    const result = await pool.query('SELECT * FROM org_tag WHERE commit_id = $1', [commitId])
+    res.json(result.rows[0])
+  } catch (e: any) {
+    res.status(500).json({ error: 'failed to fetch tag', detail: e.message })
+  }
+})
+
 app.listen(3001, () => {
   console.log('Server is running at http://localhost:3001')
 })
