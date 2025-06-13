@@ -164,6 +164,43 @@ app.patch('/api/org-nodes/edit', async (req, res) => {
   }
 })
 
+// ノード削除API
+app.delete('/api/org-nodes/:tree_node_id', async (req, res) => {
+  const { tree_node_id } = req.params
+  if (!tree_node_id) {
+    return res.status(400).json({ error: 'tree_node_idは必須です' })
+  }
+  try {
+    // 削除対象のorg_tree_node情報を取得
+    const linkResult = await pool.query('SELECT * FROM org_tree_node WHERE ctid = $1', [tree_node_id])
+    if (linkResult.rows.length === 0) {
+      return res.status(404).json({ error: 'tree_node_idが見つかりません' })
+    }
+    const treeNode = linkResult.rows[0]
+    // ノード情報取得
+    const nodeResult = await pool.query('SELECT id, name, depth FROM org_node WHERE id = $1', [treeNode.node_id])
+    const node = nodeResult.rows[0]
+    // org_tree_node削除
+    await pool.query('DELETE FROM org_tree_node WHERE ctid = $1', [tree_node_id])
+    // org_tree.updated_at更新
+    await pool.query('UPDATE org_tree SET updated_at = NOW() WHERE id = $1', [treeNode.tree_id])
+    res.json({
+      node: {
+        id: node.id,
+        name: node.name,
+        level: node.depth
+      },
+      tree_node: {
+        id: tree_node_id,
+        tree_id: treeNode.tree_id,
+        parent_node_id: treeNode.parent_id
+      }
+    })
+  } catch (e: any) {
+    res.status(500).json({ error: 'failed to delete org node', detail: e.message })
+  }
+})
+
 app.listen(3001, () => {
   console.log('Server is running at http://localhost:3001')
 })
