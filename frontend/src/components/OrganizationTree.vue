@@ -11,7 +11,6 @@ const store = useStore()
 
 // ノード選択状態
 const selectedNodeId = computed(() => store.state.selectedNodeId)
-const draftNodes = computed(() => store.state.draftNodes)
 
 // ノードリストをフラット化
 function flatten(nodes: OrgNode[], parentId: string | null = null): OrgNode[] {
@@ -23,30 +22,12 @@ function flatten(nodes: OrgNode[], parentId: string | null = null): OrgNode[] {
   nodes.forEach(n => dfs(n, parentId))
   return res
 }
-const flatNodes = computed(() => flatten(draftNodes.value.length ? draftNodes.value : props.nodes))
-
-// 選択中ノード
-const selectedNode = computed(() => flatNodes.value.find(n => n.id === selectedNodeId.value) || null)
+const flatNodes = computed(() => flatten(props.nodes))
 
 const modalNode = ref<OrgNode | null>(null)
 const isEdit = ref(true)
 
 defineExpose({})
-
-// 指定ノード配下で各階層のノードをリスト化
-function getRowForNode(node: OrgNode, maxDepth: number): (string | null)[] {
-  const row = Array(maxDepth).fill(null)
-  let current: OrgNode | undefined = node
-  while (current && current.depth <= maxDepth) {
-    row[current.depth - 1] = current.name
-    if (current.children && current.children.length > 0) {
-      current = current.children[0]
-    } else {
-      break
-    }
-  }
-  return row
-}
 
 // 全てのルートから、各パスごとに行を作る
 function getAllRows(nodes: OrgNode[], maxDepth: number): { row: (string | null)[], leafNodeId: string }[] {
@@ -69,7 +50,7 @@ function getAllRows(nodes: OrgNode[], maxDepth: number): { row: (string | null)[
   return rows
 }
 
-const tableRows = computed(() => getAllRows(flatNodes.value.filter(n => !n.parentId), maxDepth))
+const tableRows = computed(() => getAllRows(props.nodes, maxDepth))
 
 // 末端組織（リーフノード）かどうかを判定する配列を作成
 const isLeafRow = computed(() => {
@@ -217,15 +198,6 @@ export default {
   transition: background 0.2s;
   border-bottom: 1.2px solid #e0e4ea;
   cursor: pointer;
-}
-.tree-table-row {
-  /* box-shadow: 0 1px 4px rgba(60,60,60,0.04);
-  background: #fafdff;
-  margin-bottom: 0.5em;
-  overflow: hidden;
-  border-radius: 8px;
-  display: table-row;
-  border-bottom: 2.5px solid #222; */
 }
 .tree-table-row td:first-child {
   border-top-left-radius: 8px;

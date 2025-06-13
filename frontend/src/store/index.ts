@@ -61,7 +61,7 @@ export default createStore({
       commit('setDraftNodes', nodes)
       if (state.selectedNodeId === nodeId) commit('selectNode', null)
     },
-    commitDraft({ commit, state }: any, { treeId, author, message }: { treeId: string, author: string, message?: string }) {
+    commitDraft({ commit }: any, { treeId, author, message }: { treeId: string, author: string, message?: string }) {
       // API保存処理
       return fetch('http://localhost:3001/api/commit', {
         method: 'POST',

@@ -21,6 +21,27 @@ const hasDraft = computed(() => {
   return diff.added.length > 0 || diff.updated.length > 0 || diff.deleted.length > 0
 })
 
+function unflatten(nodes: any[]): any[] {
+  const nodeMap: Record<string, any> = {}
+  nodes.forEach(n => {
+    nodeMap[n.id] = { ...n, children: [] }
+  })
+  nodes.forEach(n => {
+    if (n.parentId && nodeMap[n.parentId]) {
+      nodeMap[n.parentId].children.push(nodeMap[n.id])
+    }
+  })
+  // parentIdがnull、またはdraftNodes内に親がいないものだけをルートに
+  const roots = nodes.filter(n => !n.parentId || !nodeMap[n.parentId]).map(n => nodeMap[n.id])
+  return roots
+}
+
+const displayNodes = computed(() => {
+  // ドラフトがあればネスト構造に変換して表示、なければ最新コミット
+  console.log('draftNodes:', store.state.draftNodes)
+  return hasDraft.value ? unflatten(store.state.draftNodes) : treeNodes.value
+})
+
 onMounted(async () => {
   loading.value = true
   try {
@@ -111,7 +132,7 @@ function getOldNode(newNode: any) {
     </div>
     <div v-if="loading">読み込み中...</div>
     <div v-else-if="error">エラー: {{ error }}</div>
-    <OrganizationTree v-else :nodes="treeNodes" :maxDepth="5" />
+    <OrganizationTree :nodes="displayNodes" :maxDepth="5" />
     <div v-if="showDiff" class="modal-overlay" @click.self="showDiff = false">
       <div class="modal-content">
         <h2>差分</h2>

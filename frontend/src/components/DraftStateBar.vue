@@ -4,7 +4,7 @@ const emit = defineEmits(['commit'])
 </script>
 
 <template>
-  <div v-if="hasDraft" class="draft-bar">
+  <div v-if="props.hasDraft" class="draft-bar">
     <span class="dot">●</span> 未コミットの変更があります
     <button @click="$emit('commit')">コミット</button>
   </div>
