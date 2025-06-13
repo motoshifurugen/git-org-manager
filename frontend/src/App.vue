@@ -5,6 +5,7 @@ import OrganizationTree from './components/OrganizationTree.vue'
 import DraftStateBar from './components/DraftStateBar.vue'
 import ToastMessage from './components/ToastMessage.vue'
 import CommitHistoryModal from './components/CommitHistoryModal.vue'
+import ShareModal from './components/ShareModal.vue'
 
 const store = useStore()
 const treeId = ref('')
@@ -26,6 +27,9 @@ const commitList = ref<{ id: string, message: string, author: string, created_at
 const showHistoryModal = ref(false)
 const appliedCommitId = ref('')
 const isShared = ref(false)
+const showShareModal = ref(false)
+const sharedCommits = ref<any[]>([])
+const shareLoading = ref(false)
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -313,7 +317,25 @@ function onClearDraft() {
   showToast('ドラフトをクリアしました', 'success')
 }
 
-async function onShareCurrentCommit() {
+async function openShareModal() {
+  showShareModal.value = true
+  shareLoading.value = true
+  try {
+    const res = await fetch('http://localhost:3001/api/commit_share')
+    sharedCommits.value = await res.json()
+  } catch {
+    sharedCommits.value = []
+  } finally {
+    shareLoading.value = false
+  }
+}
+
+function closeShareModal() {
+  showShareModal.value = false
+}
+
+async function handlePushShare() {
+  shareLoading.value = true
   try {
     const res = await fetch('http://localhost:3001/api/commit_share', {
       method: 'POST',
@@ -330,10 +352,32 @@ async function onShareCurrentCommit() {
     }
     showToast('コミットを共有しました', 'success')
     isShared.value = true
+    closeShareModal()
   } catch (e: any) {
     showToast('共有に失敗しました', 'error')
+  } finally {
+    shareLoading.value = false
   }
 }
+
+function handleFetchShare() {
+  // fetch案内時のfetchボタン押下時の処理（必要に応じて実装）
+  showToast('fetch機能は未実装です', 'error')
+}
+
+const iconButtonStyle = computed(() => ({
+  background: 'none',
+  border: 'none',
+  cursor: 'pointer',
+  fontSize: '1.5em',
+  color: '#347474',
+  display: 'inline-flex',
+  alignItems: 'center',
+  margin: 0,
+  padding: '10px',
+  minWidth: 'unset',
+  minHeight: 'unset',
+}))
 </script>
 
 <template>
@@ -357,28 +401,15 @@ async function onShareCurrentCommit() {
       <button
         @click="showHistoryModal = true"
         title="コミット履歴を表示"
-        style="background: none; border: none; cursor: pointer; font-size: 1.5em; margin-left: auto; color: #347474; display: flex; align-items: center;"
+        :style="{...iconButtonStyle, marginLeft: 'auto'}"
       >
         <span style="font-size:1.2em; margin:0; padding:0;">🗂️</span>
       </button>
       <button
-        @click="onShareCurrentCommit"
+        @click="openShareModal"
         title="このコミットを共有"
         :disabled="isShared"
-        :style="{
-          background: 'none',
-          border: 'none',
-          cursor: 'pointer',
-          fontSize: '1.5em',
-          color: '#347474',
-          display: 'inline-flex',
-          alignItems: 'center',
-          margin: 0,
-          padding: 0,
-          minWidth: 'unset',
-          minHeight: 'unset',
-          opacity: isShared ? 0.4 : 1
-        }"
+        :style="{...iconButtonStyle, opacity: isShared ? 0.4 : 1}"
       >
         <span style="font-size:1.2em; margin:0; padding:0;">🌐</span>
       </button>
@@ -459,6 +490,15 @@ async function onShareCurrentCommit() {
         </div>
       </div>
     </div>
+    <ShareModal
+      :show="showShareModal"
+      :onClose="closeShareModal"
+      :currentCommit="{ id: commitId, created_at: commitList.find(c => c.id === commitId)?.created_at || '' }"
+      :sharedCommits="sharedCommits"
+      :loading="shareLoading"
+      :onPush="handlePushShare"
+      :onFetch="handleFetchShare"
+    />
   </div>
 </template>
 
