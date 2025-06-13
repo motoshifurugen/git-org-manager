@@ -12,26 +12,28 @@ const emit = defineEmits(['apply', 'close'])
   <div v-if="props.show" class="modal-overlay" @click.self="() => emit('close')">
     <div class="modal-content" style="min-width: 480px; max-width: 90vw;">
       <h2 style="margin-bottom:1em;">コミット履歴</h2>
-      <table style="width:100%; border-collapse:collapse;">
-        <thead>
-          <tr style="background:#f6f7fa;">
-            <th style="padding:0.5em 0.7em; text-align:left;">日時</th>
-            <th style="padding:0.5em 0.7em; text-align:left;">メッセージ</th>
-            <th style="padding:0.5em 0.7em; text-align:left;">作成者</th>
-            <th style="padding:0.5em 0.7em;"></th>
-          </tr>
-        </thead>
-        <tbody>
-          <tr v-for="c in props.commitList" :key="c.id" style="border-bottom:1px solid #e0e4ea;">
-            <td style="padding:0.5em 0.7em; font-family:monospace;">{{ c.created_at }}</td>
-            <td style="padding:0.5em 0.7em;">{{ c.message || '(メッセージなし)' }}</td>
-            <td style="padding:0.5em 0.7em;">{{ c.author }}</td>
-            <td style="padding:0.5em 0.7em; text-align:right;">
-              <button class="history-apply-btn" @click="$emit('apply', c.id)">適用</button>
-            </td>
-          </tr>
-        </tbody>
-      </table>
+      <div class="modal-scroll-area">
+        <table style="width:100%; border-collapse:collapse;">
+          <thead>
+            <tr style="background:#f6f7fa;">
+              <th style="padding:0.5em 0.7em; text-align:left;">日時</th>
+              <th style="padding:0.5em 0.7em; text-align:left;">メッセージ</th>
+              <th style="padding:0.5em 0.7em; text-align:left;">作成者</th>
+              <th style="padding:0.5em 0.7em;"></th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr v-for="c in props.commitList" :key="c.id" style="border-bottom:1px solid #e0e4ea;">
+              <td style="padding:0.5em 0.7em; font-family:monospace;">{{ c.created_at }}</td>
+              <td style="padding:0.5em 0.7em;">{{ c.message || '(メッセージなし)' }}</td>
+              <td style="padding:0.5em 0.7em;">{{ c.author }}</td>
+              <td style="padding:0.5em 0.7em; text-align:right;">
+                <button class="history-apply-btn" @click="$emit('apply', c.id)">適用</button>
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
       <button class="history-close-btn" @click="$emit('close')" style="margin-top:1.5em;">閉じる</button>
     </div>
   </div>
@@ -87,6 +89,11 @@ const emit = defineEmits(['apply', 'close'])
 .history-close-btn:hover {
   background: #cfd4de;
   color: #2d3a4a;
+}
+.modal-scroll-area {
+  min-height: 200px;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 </style> 
 

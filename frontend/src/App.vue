@@ -304,12 +304,14 @@ watch(showTagModal, (v) => {
         <span style="font-size:1.3em;">🗂️</span>
       </button>
     </div>
-    <CommitHistoryModal
-      :show="showHistoryModal"
-      :commitList="filteredCommitList"
-      @apply="applyCommitToDraftById"
-      @close="showHistoryModal = false"
-    />
+    <div v-if="showHistoryModal">
+      <CommitHistoryModal
+        :show="showHistoryModal"
+        :commitList="filteredCommitList"
+        @apply="applyCommitToDraftById"
+        @close="showHistoryModal = false"
+      />
+    </div>
     <div v-if="showTagModal" class="modal-overlay" @click.self="closeTagModal">
       <div class="modal-content">
         <h2>タグ付与</h2>
@@ -333,34 +335,36 @@ watch(showTagModal, (v) => {
     <div v-if="showDiff" class="modal-overlay" @click.self="isCommitting ? null : showDiff = false">
       <div class="modal-content" style="position:relative;">
         <h2>差分</h2>
-        <div v-if="diffResult.added.length">
-          <h3>追加</h3>
-          <ul>
-            <li v-for="n in diffResult.added" :key="'a'+n.id" class="diff-added">
-              <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
-            </li>
-          </ul>
-        </div>
-        <div v-if="diffResult.deleted.length">
-          <h3>削除</h3>
-          <ul>
-            <li v-for="n in diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
-              <span class="diff-sign">ー</span>{{ getNodePath(n, baseFlat) }}
-            </li>
-          </ul>
-        </div>
-        <div v-if="diffResult.updated.length">
-          <h3>変更</h3>
-          <ul>
-            <li v-for="n in diffResult.updated" :key="'u'+n.id">
-              <div class="diff-deleted">
-                <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), baseFlat) }}
-              </div>
-              <div class="diff-added">
+        <div class="modal-scroll-area">
+          <div v-if="diffResult.added.length">
+            <h3>追加</h3>
+            <ul>
+              <li v-for="n in diffResult.added" :key="'a'+n.id" class="diff-added">
                 <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
-              </div>
-            </li>
-          </ul>
+              </li>
+            </ul>
+          </div>
+          <div v-if="diffResult.deleted.length">
+            <h3>削除</h3>
+            <ul>
+              <li v-for="n in diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
+                <span class="diff-sign">ー</span>{{ getNodePath(n, baseFlat) }}
+              </li>
+            </ul>
+          </div>
+          <div v-if="diffResult.updated.length">
+            <h3>変更</h3>
+            <ul>
+              <li v-for="n in diffResult.updated" :key="'u'+n.id">
+                <div class="diff-deleted">
+                  <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), baseFlat) }}
+                </div>
+                <div class="diff-added">
+                  <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
+                </div>
+              </li>
+            </ul>
+          </div>
         </div>
         <div style="margin-bottom: 1.2em;">
           <label style="font-weight: bold;">コミットメッセージ</label>
@@ -496,6 +500,11 @@ h1 {
   padding: 0.4em 1.2em;
   font-weight: bold;
   cursor: pointer;
+}
+.modal-scroll-area {
+  min-height: 200px;
+  max-height: 60vh;
+  overflow-y: auto;
 }
 </style>
 
