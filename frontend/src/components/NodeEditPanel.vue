@@ -5,22 +5,42 @@ import type { OrgNode } from '../store'
 const props = defineProps<{
   node: OrgNode
   allNodes: OrgNode[]
+  maxDepth: number
 }>()
 const emit = defineEmits(['update', 'delete'])
 
 const editName = ref(props.node.name)
-const editParentId = ref(props.node.parentId)
-const editLevel = ref(props.node.depth)
+const editParentId = ref(props.node.parentId ? String(props.node.parentId) : '')
+const editLevel = ref(1)
 
+// 親ノードのdepthを取得し、階層を自動計算
+const calcDepth = () => {
+  if (!editParentId.value) return 1
+  const parent = props.allNodes.find(n => n.id === editParentId.value)
+  return parent ? parent.depth + 1 : 1
+}
+
+// props.nodeが変わったときは全初期化
 watch(() => props.node, (n) => {
   editName.value = n.name
-  editParentId.value = n.parentId
-  editLevel.value = n.depth
+  editParentId.value = n.parentId ? String(n.parentId) : ''
+  editLevel.value = calcDepth()
+}, { immediate: true })
+
+// 親ノード選択時は階層のみ再計算
+watch(editParentId, () => {
+  editLevel.value = calcDepth()
 })
 
 const parentCandidates = computed(() =>
   props.allNodes.filter(n => n.id !== props.node.id)
 )
+
+const parentNodeName = computed(() => {
+  if (!editParentId.value) return '（ルート）'
+  const parent = props.allNodes.find(n => n.id === editParentId.value)
+  return parent ? parent.name : '（不明）'
+})
 
 const nameError = computed(() => {
   if (!editName.value) return '名称は必須です'
@@ -28,7 +48,7 @@ const nameError = computed(() => {
   return ''
 })
 const levelError = computed(() => {
-  if (!Number.isInteger(editLevel.value) || editLevel.value < 1 || editLevel.value > 10) return '階層は1〜10の整数で入力してください'
+  if (!Number.isInteger(editLevel.value) || editLevel.value < 1 || editLevel.value > props.maxDepth) return `階層は1〜${props.maxDepth}の整数で入力してください`
   return ''
 })
 
@@ -37,7 +57,7 @@ function onSubmit() {
   emit('update', {
     id: props.node.id,
     name: editName.value,
-    parentId: editParentId.value,
+    parentId: editParentId.value === '' ? null : editParentId.value,
     depth: editLevel.value
   })
 }
@@ -56,13 +76,12 @@ function onDelete() {
       </label>
       <label>親ノード
         <select v-model="editParentId">
-          <option :value="null">(ルート)</option>
-          <option v-for="n in parentCandidates" :key="n.id" :value="n.id">{{ n.name }}</option>
+          <option :value="''">(ルート)</option>
+          <option v-for="n in parentCandidates" :key="n.id" :value="String(n.id)">{{ n.name }}</option>
         </select>
       </label>
       <label>階層
-        <input type="number" v-model.number="editLevel" min="1" max="10" />
-        <span v-if="levelError" class="error">{{ levelError }}</span>
+        <div class="parent-name">第{{ editLevel }}階層</div>
       </label>
       <div class="btns">
         <button type="submit" :disabled="!!nameError || !!levelError">保存</button>
@@ -118,6 +137,15 @@ button:disabled {
   color: #d00;
   font-size: 0.85em;
   margin-left: 0.5em;
+}
+.parent-name {
+  padding: 0.3em 0.5em;
+  background: #f4f4f4;
+  border-radius: 4px;
+  color: #555;
+  margin-top: 0.2em;
+  margin-bottom: 0.5em;
+  font-size: 0.97em;
 }
 </style>
 

@@ -14,13 +14,13 @@ const selectedNodeId = computed(() => store.state.selectedNodeId)
 const draftNodes = computed(() => store.state.draftNodes)
 
 // ノードリストをフラット化
-function flatten(nodes: OrgNode[]): OrgNode[] {
+function flatten(nodes: OrgNode[], parentId: string | null = null): OrgNode[] {
   const res: OrgNode[] = []
-  function dfs(n: OrgNode) {
-    res.push(n)
-    if (n.children) n.children.forEach(dfs)
+  function dfs(n: OrgNode, parentId: string | null) {
+    res.push({ ...n, parentId })
+    if (n.children) n.children.forEach(child => dfs(child, n.id))
   }
-  nodes.forEach(dfs)
+  nodes.forEach(n => dfs(n, parentId))
   return res
 }
 const flatNodes = computed(() => flatten(draftNodes.value.length ? draftNodes.value : props.nodes))
@@ -46,13 +46,13 @@ function getRowForNode(node: OrgNode, maxDepth: number): (string | null)[] {
 }
 
 // 全てのルートから、各パスごとに行を作る
-function getAllRows(nodes: OrgNode[], maxDepth: number): (string | null)[][] {
-  const rows: (string | null)[][] = []
+function getAllRows(nodes: OrgNode[], maxDepth: number): { row: (string | null)[], leafNodeId: string }[] {
+  const rows: { row: (string | null)[], leafNodeId: string }[] = []
   function dfs(node: OrgNode, path: (string | null)[]) {
     const newPath = [...path]
     newPath[node.depth - 1] = node.name
     if (!node.children || node.children.length === 0) {
-      rows.push(newPath)
+      rows.push({ row: newPath, leafNodeId: node.id })
     } else {
       for (const child of node.children) {
         dfs(child, newPath)
@@ -70,9 +70,7 @@ const tableRows = computed(() => getAllRows(flatNodes.value.filter(n => !n.paren
 
 // 末端組織（リーフノード）かどうかを判定する配列を作成
 const isLeafRow = computed(() => {
-  return tableRows.value.map(row => {
-    // 末端組織は一番右側（depth最大）の非nullセルがその組織名
-    // もしくは、rowの中で一番右の非nullが末端
+  return tableRows.value.map(({ row }) => {
     for (let i = maxDepth - 1; i >= 0; i--) {
       if (row[i] !== null) {
         return i
@@ -119,19 +117,21 @@ export default {
         </tr>
       </thead>
       <tbody>
-        <tr v-for="(row, idx) in tableRows" :key="idx" class="tree-table-row">
+        <tr v-for="({ row, leafNodeId }, idx) in tableRows" :key="idx" class="tree-table-row">
           <td
             v-for="(cell, d) in row"
             :key="d"
             :class="[
               { 'leaf-cell': isLeafRow[idx] === d },
               { 'parent-cell': cell && isLeafRow[idx] !== d },
-              { 'selected-cell': flatNodes[0 + idx]?.id === selectedNodeId }
+              { 'selected-cell': leafNodeId === selectedNodeId }
             ]"
-            @click="onSelectNode(flatNodes[0 + idx]?.id)"
+            @click="onSelectNode(leafNodeId)"
           >
             {{ cell || '-' }}
-            <button v-if="isLeafRow[idx] === d && flatNodes[0 + idx]" @click.stop="onAddChild(flatNodes[0 + idx].id, flatNodes[0 + idx].depth)">＋</button>
+            <template v-if="isLeafRow[idx] === d && leafNodeId">
+              <button class="add-btn" @click.stop="onAddChild(leafNodeId, d + 1 - 1)">＋</button>
+            </template>
           </td>
         </tr>
       </tbody>
@@ -143,6 +143,7 @@ export default {
         <NodeEditPanel
           :node="selectedNode"
           :allNodes="flatNodes"
+          :maxDepth="maxDepth"
           @update="onUpdateNode"
           @delete="onDeleteNode"
         />
@@ -256,5 +257,27 @@ export default {
   color: #888;
   cursor: pointer;
   z-index: 10;
+}
+.add-btn-cell {
+  width: 1%;
+  padding-left: 0.2em;
+  padding-right: 0.2em;
+  text-align: left;
+}
+.add-btn {
+  font-size: 0.9em;
+  padding: 0.2em 0.5em;
+  background: #f0f0f0;
+  color: #555;
+  border: 1px solid #ccc;
+  border-radius: 4px;
+  cursor: pointer;
+  margin-left: 0.2em;
+  box-shadow: none;
+}
+.add-btn:hover {
+  background: #e0e0e0;
+  color: #222;
+  border-color: #bbb;
 }
 </style> 
