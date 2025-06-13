@@ -98,6 +98,7 @@ function onUpdateNode(payload: { id: string, name: string, parentId: string | nu
 // ノード削除
 function onDeleteNode(nodeId: string) {
   store.dispatch('deleteNode', nodeId)
+  onCloseModal()
 }
 // モーダルを閉じる
 function onCloseModal() {
