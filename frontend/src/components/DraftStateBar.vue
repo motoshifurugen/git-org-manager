@@ -1,12 +1,12 @@
 <script setup lang="ts">
 const props = defineProps<{ hasDraft: boolean }>()
-const emit = defineEmits(['commit'])
+const emit = defineEmits(['commit', 'diff'])
 </script>
 
 <template>
   <div v-if="props.hasDraft" class="draft-bar">
     <span class="dot">●</span> 未コミットの変更があります
-    <button @click="$emit('commit')">コミット</button>
+    <button @click="$emit('diff')">diff</button>
   </div>
 </template>
 

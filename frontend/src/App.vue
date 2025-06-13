@@ -3,6 +3,7 @@ import { ref, onMounted, computed } from 'vue'
 import { useStore } from 'vuex'
 import OrganizationTree from './components/OrganizationTree.vue'
 import DraftStateBar from './components/DraftStateBar.vue'
+import ToastMessage from './components/ToastMessage.vue'
 
 const store = useStore()
 const treeId = ref('')
@@ -12,6 +13,8 @@ const error = ref('')
 const showDiff = ref(false)
 const diffResult = ref<{ added: any[]; updated: any[]; deleted: any[] }>({ added: [], updated: [], deleted: [] })
 const baseFlat = computed(() => flatten(treeNodes.value))
+const toast = ref<{ message: string; type: 'success' | 'error' } | null>(null)
+const commitMessage = ref('')
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -59,10 +62,9 @@ const displayNodes = computed(() => {
     : unflatten(flatten(treeNodes.value))
 })
 
-onMounted(async () => {
+async function fetchLatestTree() {
   loading.value = true
   try {
-    // 最新コミット取得
     const commitRes = await fetch('http://localhost:3001/api/commits/latest')
     if (!commitRes.ok) throw new Error('最新コミット取得失敗')
     const commit = await commitRes.json()
@@ -71,14 +73,15 @@ onMounted(async () => {
     if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
     const treeData = await treeRes.json()
     treeNodes.value = treeData.nodes
-    // 初期ノードをdraftにセット
     store.commit('setDraftNodes', flatten(treeData.nodes))
   } catch (e: any) {
     error.value = e.message || '不明なエラー'
   } finally {
     loading.value = false
   }
-})
+}
+
+onMounted(fetchLatestTree)
 
 function flatten(nodes: any[], parentId: string | null = null): any[] {
   const res: any[] = []
@@ -110,15 +113,25 @@ function onDiff() {
   showDiff.value = true
 }
 
+function showToast(message: string, type: 'success' | 'error' = 'success') {
+  toast.value = { message, type }
+}
+
 function onCommitFromDiff() {
-  const message = window.prompt('コミットメッセージを入力してください', '') || ''
+  const message = commitMessage.value.trim()
+  if (!message) {
+    showToast('コミットメッセージを入力してください', 'error')
+    return
+  }
   store.dispatch('commitDraft', { treeId: treeId.value, author: 'admin_user', message })
-    .then((data: any) => {
-      alert('コミット完了: ' + data.commit_id)
+    .then(async (data: any) => {
+      showToast('コミット完了: ' + data.commit_id, 'success')
       showDiff.value = false
+      commitMessage.value = ''
+      await fetchLatestTree()
     })
     .catch((e: any) => {
-      alert('コミット失敗: ' + (e.message || e))
+      showToast('コミット失敗: ' + (e.message || e), 'error')
     })
 }
 
@@ -142,10 +155,15 @@ function getOldNode(newNode: any) {
 
 <template>
   <div>
+    <ToastMessage
+      v-if="toast"
+      :message="toast.message"
+      :type="toast.type"
+      @close="toast = null"
+    />
     <h1>組織構造ツリー</h1>
     <div style="display: flex; align-items: center; gap: 1em;">
-      <DraftStateBar :hasDraft="hasDraft" />
-      <button v-if="hasDraft" class="diff-btn" @click="onDiff">diff</button>
+      <DraftStateBar :hasDraft="hasDraft" @diff="onDiff" />
     </div>
     <div v-if="loading">読み込み中...</div>
     <div v-else-if="error">エラー: {{ error }}</div>
@@ -181,6 +199,10 @@ function getOldNode(newNode: any) {
               </div>
             </li>
           </ul>
+        </div>
+        <div style="margin-bottom: 1.2em;">
+          <label style="font-weight: bold;">コミットメッセージ</label>
+          <input v-model="commitMessage" maxlength="100" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="コミット内容を入力" />
         </div>
         <button @click="onCommitFromDiff">コミット</button>
         <button @click="showDiff = false">閉じる</button>
