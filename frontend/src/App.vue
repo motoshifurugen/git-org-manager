@@ -31,23 +31,32 @@ function unflatten(nodes: any[]): any[] {
       nodeMap[n.parentId].children.push(nodeMap[n.id])
     }
   })
-  // 各childrenをname昇順でソート
+  // 各childrenをname昇順+id昇順で安定ソート
   Object.values(nodeMap).forEach((n: any) => {
     if (n.children && n.children.length > 0) {
-      n.children.sort((a: any, b: any) => a.name.localeCompare(b.name, 'ja'))
+      n.children.sort((a: any, b: any) => {
+        const nameCmp = a.name.localeCompare(b.name, 'ja')
+        if (nameCmp !== 0) return nameCmp
+        return a.id.localeCompare(b.id)
+      })
     }
   })
   // parentIdがnull、またはdraftNodes内に親がいないものだけをルートに
   const roots = nodes.filter(n => !n.parentId || !nodeMap[n.parentId]).map(n => nodeMap[n.id])
-  // ルートもname昇順でソート
-  roots.sort((a: any, b: any) => a.name.localeCompare(b.name, 'ja'))
+  // ルートもname昇順+id昇順で安定ソート
+  roots.sort((a: any, b: any) => {
+    const nameCmp = a.name.localeCompare(b.name, 'ja')
+    if (nameCmp !== 0) return nameCmp
+    return a.id.localeCompare(b.id)
+  })
   return roots
 }
 
 const displayNodes = computed(() => {
-  // ドラフトがあればネスト構造に変換して表示、なければ最新コミット
-  console.log('draftNodes:', store.state.draftNodes)
-  return hasDraft.value ? unflatten(store.state.draftNodes) : treeNodes.value
+  // 常にunflattenでchildren/rootsをソートして表示
+  return hasDraft.value
+    ? unflatten(store.state.draftNodes)
+    : unflatten(flatten(treeNodes.value))
 })
 
 onMounted(async () => {
