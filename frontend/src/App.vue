@@ -25,6 +25,7 @@ const isTagSubmitting = ref(false)
 const commitList = ref<{ id: string, message: string, author: string, created_at: string, tree_id: string, parent_commit_id: string | null }[]>([])
 const showHistoryModal = ref(false)
 const appliedCommitId = ref('')
+const isShared = ref(false)
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -126,9 +127,23 @@ async function applyCommitToDraftById(commitId: string) {
   showHistoryModal.value = false
 }
 
+async function checkIsShared() {
+  try {
+    const res = await fetch('http://localhost:3001/api/commit_share')
+    if (!res.ok) throw new Error('共有一覧取得失敗')
+    const shares = await res.json()
+    isShared.value = shares.some((s: any) => s.commit_id === commitId.value)
+  } catch {
+    isShared.value = false
+  }
+}
+
+watch(commitId, () => { checkIsShared() })
+
 onMounted(() => {
   fetchLatestTree()
   fetchCommitList()
+  checkIsShared()
 })
 
 function flatten(nodes: any[], parentId: string | null = null): any[] {
@@ -260,7 +275,11 @@ async function submitTag() {
     if (!res.ok) {
       const err = await res.json().catch(() => ({}))
       if (res.status === 409) {
-        showToast('このコミットには既にタグが付与されています', 'error')
+        if (err?.error && err.error.includes('タグ名')) {
+          showToast('このタグ名は既に使われています', 'error')
+        } else {
+          showToast('このコミットには既にタグが付与されています', 'error')
+        }
       } else if (err?.error) {
         showToast('タグ付与失敗: ' + err.error, 'error')
       } else {
@@ -271,6 +290,7 @@ async function submitTag() {
     const data = await res.json()
     tagName.value = data.name
     showToast('タグを付与しました', 'success')
+    await fetchCommitList()
     closeTagModal()
   } catch (e: any) {
     showToast('タグ付与に失敗しました', 'error')
@@ -291,6 +311,28 @@ function onClearDraft() {
   fetchCommitList()
   appliedCommitId.value = commitId.value
   showToast('ドラフトをクリアしました', 'success')
+}
+
+async function onShareCurrentCommit() {
+  try {
+    const res = await fetch('http://localhost:3001/api/commit_share', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ commit_id: commitId.value })
+    })
+    if (!res.ok) {
+      if (res.status === 409) {
+        showToast('このコミットは既に共有されています', 'error')
+        isShared.value = true
+        return
+      }
+      throw new Error('共有に失敗しました')
+    }
+    showToast('コミットを共有しました', 'success')
+    isShared.value = true
+  } catch (e: any) {
+    showToast('共有に失敗しました', 'error')
+  }
 }
 </script>
 
@@ -315,9 +357,30 @@ function onClearDraft() {
       <button
         @click="showHistoryModal = true"
         title="コミット履歴を表示"
-        style="background: none; border: none; cursor: pointer; font-size: 1.7em; margin-left: auto; color: #347474; display: flex; align-items: center;"
+        style="background: none; border: none; cursor: pointer; font-size: 1.5em; margin-left: auto; color: #347474; display: flex; align-items: center;"
       >
-        <span style="font-size:1.3em;">🗂️</span>
+        <span style="font-size:1.2em; margin:0; padding:0;">🗂️</span>
+      </button>
+      <button
+        @click="onShareCurrentCommit"
+        title="このコミットを共有"
+        :disabled="isShared"
+        :style="{
+          background: 'none',
+          border: 'none',
+          cursor: 'pointer',
+          fontSize: '1.5em',
+          color: '#347474',
+          display: 'inline-flex',
+          alignItems: 'center',
+          margin: 0,
+          padding: 0,
+          minWidth: 'unset',
+          minHeight: 'unset',
+          opacity: isShared ? 0.4 : 1
+        }"
+      >
+        <span style="font-size:1.2em; margin:0; padding:0;">🌐</span>
       </button>
     </div>
     <div v-if="showHistoryModal">

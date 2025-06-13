@@ -43,6 +43,9 @@ router.post('/tags', async (req, res) => {
     const tag = insertResult.rows[0];
     res.json({ success: true, tag_id: tag.id, name: tag.name, commit_id: tag.commit_id });
   } catch (e: any) {
+    if (e.code === '23505') {
+      return res.status(409).json({ error: 'このタグ名は既に使われています' });
+    }
     res.status(500).json({ error: 'タグ作成に失敗しました', detail: e.message });
   }
 });

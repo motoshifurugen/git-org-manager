@@ -5,7 +5,7 @@ const props = defineProps<{
   show: boolean,
   commitList: { id: string, message: string, author: string, created_at: string, tree_id: string, tag_name?: string | null }[]
 }>()
-const emit = defineEmits(['apply', 'close'])
+const emit = defineEmits(['apply', 'close', 'share'])
 
 // タグあり/なしでグループ化（連続したタグなしをまとめる）
 const groupedCommits = computed(() => {
@@ -48,7 +48,7 @@ const showUntagged = ref<{ [key: number]: boolean }>({})
           <tbody>
             <template v-for="(group, idx) in groupedCommits">
               <template v-if="group.type === 'tagged' && group.commit">
-                <tr :key="'tagged-' + group.commit.id">
+                <tr :key="'tagged-' + group.commit.id" class="tagged-row">
                   <td style="padding:0.5em 0.7em; font-family:monospace; text-align:center;">{{ group.commit.created_at }}</td>
                   <td style="padding:0.5em 0.7em; text-align:center;">{{ group.commit.message || '(メッセージなし)' }}</td>
                   <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ group.commit.tag_name || '' }}</td>
@@ -60,7 +60,7 @@ const showUntagged = ref<{ [key: number]: boolean }>({})
               </template>
               <template v-else-if="group.type === 'untagged' && group.commits">
                 <tr :key="'untagged-header-' + idx">
-                  <td :colspan="5" style="text-align:center; background:#f6f7fa; cursor:pointer; color:#347474; font-weight:bold;" @click="showUntagged[idx] = !showUntagged[idx]">
+                  <td :colspan="5" style="text-align:center; background:#f6f7fa; cursor:pointer; padding:0.25em 0;font-size:0.9em;" @click="showUntagged[idx] = !showUntagged[idx]">
                     <span v-if="!showUntagged[idx]">▼ タグのない{{ group.commits.length }}件のコミットを表示</span>
                     <span v-else>▲ タグのない{{ group.commits.length }}件のコミットを非表示</span>
                   </td>
@@ -139,6 +139,9 @@ const showUntagged = ref<{ [key: number]: boolean }>({})
   min-height: 200px;
   max-height: 60vh;
   overflow-y: auto;
+}
+.tagged-row td {
+  font-weight: bold;
 }
 </style> 
 
