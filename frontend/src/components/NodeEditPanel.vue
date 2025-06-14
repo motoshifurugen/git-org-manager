@@ -80,7 +80,7 @@ function onDelete() {
       </label>
       <div class="btns">
         <button type="submit" :disabled="!!nameError || !!levelError">保存</button>
-        <button v-if="isEdit" type="button" @click="onDelete">削除</button>
+        <button v-if="isEdit" type="button" class="delete-btn" @click="onDelete">削除</button>
       </div>
     </form>
   </div>

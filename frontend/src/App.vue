@@ -52,7 +52,7 @@ const loadingMerge = ref(false)
 const sharedCommitIds = ref<string[]>([])
 
 const hasDraft = computed(() => {
-  const diff = calcDiff(treeNodes.value, store.state.draftNodes)
+  const diff = calcDiff(flatten(treeNodes.value), store.state.draftNodes)
   if (diff.added.length > 0 || diff.updated.length > 0 || diff.deleted.length > 0) {
     console.log('未コミットの差分:', diff)
   }
@@ -62,11 +62,12 @@ const hasDraft = computed(() => {
 function unflatten(nodes: any[]): any[] {
   const nodeMap: Record<string, any> = {}
   nodes.forEach(n => {
-    nodeMap[n.id] = { ...n, children: [] }
+    nodeMap[String(n.id)] = { ...n, children: [] }
   })
   nodes.forEach(n => {
-    if (n.parentId && nodeMap[n.parentId]) {
-      nodeMap[n.parentId].children.push(nodeMap[n.id])
+    const parentKey = n.parentId == null ? null : String(n.parentId)
+    if (parentKey && nodeMap[parentKey]) {
+      nodeMap[parentKey].children.push(nodeMap[String(n.id)])
     }
   })
   // 各childrenをname昇順+id昇順で安定ソート
@@ -79,8 +80,10 @@ function unflatten(nodes: any[]): any[] {
       })
     }
   })
-  // parentIdがnull、またはdraftNodes内に親がいないものだけをルートに
-  const roots = nodes.filter(n => !n.parentId || !nodeMap[n.parentId]).map(n => nodeMap[n.id])
+  console.log('[unflatten] nodes:', nodes)
+  // parentIdがnull/空文字/undefined/親がいないものをルートに（parentIdはstringで比較）
+  const roots = nodes.filter(n => n.parentId === null || n.parentId === '' || n.parentId === undefined || !nodeMap[String(n.parentId)]).map(n => nodeMap[String(n.id)])
+  console.log('[unflatten] roots:', roots)
   // ルートもname昇順+id昇順で安定ソート
   roots.sort((a: any, b: any) => {
     const nameCmp = a.name.localeCompare(b.name, 'ja')
@@ -98,15 +101,20 @@ const displayNodes = computed(() => {
 })
 
 async function fetchLatestTree() {
+  console.log('[fetchLatestTree] called')
   loading.value = true
   noCommit.value = false
   try {
     // 自分の最新コミットのみ取得
     const userId = localStorage.getItem('userId') || ''
     const commitRes = await fetch(`http://localhost:3001/api/commits?author=${encodeURIComponent(userId)}`)
-    if (!commitRes.ok) throw new Error('最新コミット取得失敗')
+    if (!commitRes.ok) {
+      console.log('[fetchLatestTree] commitRes not ok')
+      throw new Error('最新コミット取得失敗')
+    }
     const commits = await commitRes.json()
     if (!commits.length) {
+      console.log('[fetchLatestTree] commits.length === 0')
       // コミットがない場合は最新の共有コミットを取得
       noCommit.value = true
       // 最新のorg_commit_shareを取得
@@ -126,12 +134,17 @@ async function fetchLatestTree() {
     commitId.value = commit.id
     treeId.value = commit.tree_id
     const treeRes = await fetch(`http://localhost:3001/api/trees/${treeId.value}`)
-    if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
+    if (!treeRes.ok) {
+      console.log('[fetchLatestTree] treeRes not ok')
+      throw new Error('ツリー構造取得失敗')
+    }
     const treeData = await treeRes.json()
+    console.log('[fetchLatestTree] treeData.nodes:', treeData.nodes)
     treeNodes.value = treeData.nodes
-    store.commit('setDraftNodes', treeData.nodes)
+    store.commit('setDraftNodes', flatten(treeData.nodes))
     await fetchCommitList()
   } catch (e: any) {
+    console.log('[fetchLatestTree] catch', e)
     error.value = e.message || '不明なエラー'
   } finally {
     loading.value = false
@@ -172,7 +185,7 @@ async function applyCommitToDraftById(commitId: string) {
   if (!commit) return
   const treeRes = await fetch(`http://localhost:3001/api/trees/${commit.tree_id}`)
   const treeData = await treeRes.json()
-  store.commit('setDraftNodes', treeData.nodes)
+  store.commit('setDraftNodes', flatten(treeData.nodes))
   showToast('選択したコミット内容をドラフトに適用しました', 'success')
   appliedCommitId.value = commitId
   showHistoryModal.value = false
@@ -205,7 +218,7 @@ function flatten(nodes: any[], parentId: string | null = null): any[] {
   function dfs(n: any, parentId: string | null) {
     if (visited.has(String(n.id))) return
     visited.add(String(n.id))
-    res.push({ ...n, id: String(n.id), parentId: parentId == null ? null : String(parentId) })
+    res.push({ ...n, id: String(n.id), parentId: parentId === undefined || parentId === '' ? null : parentId })
     if (n.children) (n.children as any[]).forEach((child: any) => dfs(child, n.id))
   }
   nodes.forEach((n: any) => dfs(n, parentId))
@@ -237,7 +250,7 @@ function calcDiff(baseNodes: any[], draftNodes: any[]): { added: any[]; updated:
 }
 
 function onDiff() {
-  diffResult.value = calcDiff(treeNodes.value, store.state.draftNodes)
+  diffResult.value = calcDiff(flatten(treeNodes.value), store.state.draftNodes)
   showDiff.value = true
 }
 
@@ -435,6 +448,8 @@ async function fetchLatestSharedCommit() {
     const treeRes = await fetch(`http://localhost:3001/api/trees/${latestSharedCommit.value.tree_id}`)
     if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
     const treeData = await treeRes.json()
+    console.log('[fetchLatestSharedCommit] treeData.nodes:', treeData.nodes)
+    console.log('[flatten result]', flatten(treeData.nodes))
     fetchedDraftNodes.value = flatten(treeData.nodes)
     showFetchCompare.value = true
   } catch (e: any) {
@@ -459,7 +474,7 @@ const iconButtonStyle = computed<CSSProperties>(() => ({
   border: 'none',
   cursor: 'pointer',
   fontSize: '1.25em',
-  color: '#347474',
+  color: '#222',
   display: 'inline-flex',
   flexDirection: 'column',
   alignItems: 'center',
@@ -671,202 +686,208 @@ const canEditTag = computed(() => {
 
 <template>
   <div style="display:flex; flex-direction:column; align-items:flex-start; min-height:100vh;">
-    <template v-if="!userId">
-      <div class="login-container">
-        <h2>ログイン</h2>
-        <input v-model="loginName" placeholder="ユーザー名" :disabled="isLoggingIn" />
-        <input v-model="loginPassword" type="password" placeholder="パスワード" :disabled="isLoggingIn" />
-        <div style="margin: 0.7em 0; color: #c41d7f; min-height: 1.5em;">{{ loginError }}</div>
-        <button @click="handleLogin(false)" :disabled="isLoggingIn">ログイン</button>
-        <button @click="handleLogin(true)" :disabled="isLoggingIn">新規登録</button>
+    <header class="app-header">
+      <div class="header-title">git-org-manager</div>
+      <div class="header-user" v-if="userId">
+        <span class="header-username">👤 {{ user }}</span>
+        <button @click="handleLogout" class="header-logout">ログアウト</button>
       </div>
-    </template>
-    <template v-else>
-      <div style="display:flex; align-items:center; justify-content: flex-end; margin-bottom: 0.5em; width:100%;">
-        <span style="margin-right:1em; font-weight:bold;">👤 {{ user }}</span>
-        <button @click="handleLogout" style="background:#e0e4ea; color:#2d3a4a; border-radius:6px; border:none; padding:0.3em 1.2em; cursor:pointer;">ログアウト</button>
-      </div>
-      <ToastMessage
-        v-if="toast"
-        :message="toast.message"
-        :type="toast.type"
-        @close="toast = null"
-      />
-      <div v-if="showFetchCompare && fetchedDraftNodes">
-        <div style="max-width:100vw; box-sizing:border-box; padding:0 2vw; margin:0 auto; width:100%; overflow-x:auto; position:relative;">
-          <div v-if="loadingMerge" style="position:absolute; left:0; top:0; width:100%; height:100%; background:rgba(255,255,255,0.7); z-index:20; display:flex; align-items:center; justify-content:center;">
-            <span class="spinner" style="width:3em; height:3em; border-width:6px;"></span>
-          </div>
-          <div style="display: flex; gap: 2em; width:100%; align-items: center;">
-            <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-              <h2 style="margin:0;">自分の最新コミット</h2>
-            </div>
-            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:60px;">
-              <div style="display:flex; gap:0.7em; align-items:center;">
-                <button @click="onMergeClick" style="display:flex; align-items:center; justify-content:center; background: #347474; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
-                  <span style="font-size:1em; margin-right:0.5em;">←</span>merge
-                </button>
-                <button @click="onCancelFetchCompare" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
-              </div>
-            </div>
-            <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
-              <h2 style="margin:0;">fetchした共有コミット</h2>
-            </div>
-          </div>
-          <div style="display: flex; gap: 2em; width:100%;">
-            <div style="flex: 1; min-width:0;">
-              <OrganizationTree :nodes="unflatten(store.state.draftNodes)" :maxDepth="5" />
-            </div>
-            <div style="flex: 1; min-width:0;">
-              <OrganizationTree :nodes="unflatten(fetchedDraftNodes)" :maxDepth="5" />
-            </div>
-          </div>
+    </header>
+    <div class="app-content">
+      <template v-if="!userId">
+        <div class="login-container">
+          <h2>ログイン</h2>
+          <input v-model="loginName" placeholder="ユーザー名" :disabled="isLoggingIn" />
+          <input v-model="loginPassword" type="password" placeholder="パスワード" :disabled="isLoggingIn" />
+          <div style="margin: 0.7em 0; color: #c41d7f; min-height: 1.5em;">{{ loginError }}</div>
+          <button @click="handleLogin(false)" :disabled="isLoggingIn">ログイン</button>
+          <button @click="handleLogin(true)" :disabled="isLoggingIn">新規登録</button>
         </div>
-      </div>
-      <div v-else-if="noCommit && !hasDraft && !appliedCommitId" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
-        <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.7em;">まだコミットがありません</div>
-        <button
-          v-if="latestSharedCommit"
-          @click="onSyncFetchClick"
-          :disabled="hasDraft"
-          style="background:#347474; color:#fff; border:none; border-radius:6px; padding:0.6em 1.5em; font-weight:600; font-size:1em;"
-        >最新の共有コミットをfetch</button>
-        <div v-else style="color:#c41d7f;">共有コミットが存在しません</div>
-      </div>
-      <div v-else style="width:100%">
-        <h1>組織構造ツリー</h1>
-        <div style="display: flex; align-items: center; margin-bottom: 0.7em;">
-          <DraftStateBar
-            :hasDraft="!isCommitting && hasDraft"
-            :tagName="displayTagName"
-            :commitId="appliedCommitId || commitId"
-            :canEditTag="canEditTag"
-            @diff="onDiff"
-            @edit-tag="openTagModal"
-            @clear="onClearDraft"
-          />
-          <div style="margin-left: auto; display: flex; gap: 0;">
-            <button
-              @click="showHistoryModal = true"
-              title="コミット履歴を表示"
-              :style="iconButtonStyle"
-            >
-              <span style="font-size:1.2em; margin:0; padding:0 12px;">🗂️</span>
-              <span class="icon-label">履歴</span>
-            </button>
-            <button
-              @click="openShareModal"
-              title="このコミットを共有"
-              :disabled="isShared || noCommit"
-              :style="{...iconButtonStyle, position: 'relative', opacity: (isShared || noCommit) ? 0.4 : 1}"
-              @mouseenter="onSyncButtonHover"
-              @mouseleave="showSyncTooltip = false"
-            >
-              <span style="font-size:1.2em; margin:0; padding:0 12px;">🌐</span>
-              <span class="icon-label">同期</span>
-              <div v-if="showSyncTooltip" class="sync-tooltip">{{ syncTooltipText }}</div>
-            </button>
-          </div>
-        </div>
-        <div v-if="showHistoryModal">
-          <CommitHistoryModal
-            :show="showHistoryModal"
-            :commitList="filteredCommitList"
-            :sharedCommitIds="sharedCommitIds"
-            @apply="applyCommitToDraftById"
-            @close="showHistoryModal = false"
-          />
-        </div>
-        <div v-if="showTagModal" class="modal-overlay" @click.self="closeTagModal">
-          <div class="modal-content">
-            <h2>タグ付与</h2>
-            <div style="margin-bottom: 1.2em;">
-              <label style="font-weight: bold;">タグ名</label>
-              <input v-model="tagInput" maxlength="50" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="タグ名を入力" :disabled="isTagSubmitting" />
-            </div>
-            <button @click="submitTag" :disabled="isTagSubmitting">
-              <span v-if="isTagSubmitting" class="spinner" style="margin-right:0.7em;"></span>
-              保存
-            </button>
-            <button @click="closeTagModal" :disabled="isTagSubmitting">閉じる</button>
-            <div v-if="isTagSubmitting" class="modal-committing-overlay">
-              <span class="spinner"></span>
-            </div>
-          </div>
-        </div>
-        <div v-if="loading">読み込み中...</div>
-        <div v-else-if="error">エラー: {{ error }}</div>
-        <OrganizationTree :nodes="displayNodes" :maxDepth="5" />
-        <div v-if="showDiff" class="modal-overlay" @click.self="isCommitting ? null : showDiff = false">
-          <div class="modal-content" style="position:relative;">
-            <h2>差分</h2>
-            <div class="modal-scroll-area">
-              <div v-if="diffResult.added.length">
-                <h3>追加</h3>
-                <ul>
-                  <li v-for="n in diffResult.added" :key="'a'+n.id" class="diff-added">
-                    <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
-                  </li>
-                </ul>
-              </div>
-              <div v-if="diffResult.deleted.length">
-                <h3>削除</h3>
-                <ul>
-                  <li v-for="n in diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
-                    <span class="diff-sign">ー</span>{{ getNodePath(n, baseFlat) }}
-                  </li>
-                </ul>
-              </div>
-              <div v-if="diffResult.updated.length">
-                <h3>変更</h3>
-                <ul>
-                  <li v-for="n in diffResult.updated" :key="'u'+n.id">
-                    <div class="diff-deleted">
-                      <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), baseFlat) }}
-                    </div>
-                    <div class="diff-added">
-                      <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
-                    </div>
-                  </li>
-                </ul>
-              </div>
-            </div>
-            <div style="margin-bottom: 1.2em;">
-              <label style="font-weight: bold;">コミットメッセージ</label>
-              <input v-model="commitMessage" maxlength="100" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="コミット内容を入力" :disabled="isCommitting" />
-            </div>
-            <button @click="onCommitFromDiff" :disabled="isCommitting">
-              <span v-if="isCommitting" class="spinner" style="margin-right:0.7em;"></span>
-              コミット
-            </button>
-            <button @click="showDiff = false" :disabled="isCommitting">閉じる</button>
-            <div v-if="isCommitting" class="modal-committing-overlay">
-              <span class="spinner"></span>
-            </div>
-          </div>
-        </div>
-        <ShareModal
-          :show="showShareModal"
-          :onClose="closeShareModal"
-          :currentCommit="{ id: commitId, created_at: commitList.find(c => c.id === commitId)?.created_at || '' }"
-          :sharedCommits="sharedCommits"
-          :loading="shareLoading"
-          :onPush="handlePushShare"
-          :onFetch="handleFetchShare"
+      </template>
+      <template v-else>
+        <ToastMessage
+          v-if="toast"
+          :message="toast.message"
+          :type="toast.type"
+          @close="toast = null"
         />
-      </div>
-    </template>
+        <div v-if="showFetchCompare && fetchedDraftNodes">
+          <div style="max-width:100vw; box-sizing:border-box; padding:0 2vw; margin:0 auto; width:100%; overflow-x:auto; position:relative;">
+            <div v-if="loadingMerge" style="position:absolute; left:0; top:0; width:100%; height:100%; background:rgba(255,255,255,0.7); z-index:20; display:flex; align-items:center; justify-content:center;">
+              <span class="spinner" style="width:3em; height:3em; border-width:6px;"></span>
+            </div>
+            <div style="display: flex; gap: 2em; width:100%; align-items: center;">
+              <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <h2 style="margin:0;">自分の最新コミット</h2>
+              </div>
+              <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:60px;">
+                <div style="display:flex; gap:0.7em; align-items:center;">
+                  <button @click="onMergeClick" style="display:flex; align-items:center; justify-content:center; background: #222; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
+                    <span style="font-size:1em; margin-right:0.5em;">←</span>merge
+                  </button>
+                  <button @click="onCancelFetchCompare" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
+                </div>
+              </div>
+              <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+                <h2 style="margin:0;">fetchした共有コミット</h2>
+              </div>
+            </div>
+            <div style="display: flex; gap: 2em; width:100%;">
+              <div style="flex: 1; min-width:0;">
+                <OrganizationTree :nodes="unflatten(store.state.draftNodes)" :maxDepth="5" />
+              </div>
+              <div style="flex: 1; min-width:0;">
+                <OrganizationTree :nodes="unflatten(fetchedDraftNodes)" :maxDepth="5" />
+              </div>
+            </div>
+          </div>
+        </div>
+        <div v-else-if="noCommit && !hasDraft && !appliedCommitId" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
+          <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.7em;">まだコミットがありません</div>
+          <button
+            v-if="latestSharedCommit"
+            @click="onSyncFetchClick"
+            :disabled="hasDraft"
+            style="background:#222; color:#fff; border:none; border-radius:6px; padding:0.6em 1.5em; font-weight:600; font-size:1em;"
+          >最新の共有コミットをfetch</button>
+          <div v-else style="color:#c41d7f;">共有コミットが存在しません</div>
+        </div>
+        <div v-else style="width:100%">
+          <div style="display: flex; align-items: center; margin-bottom: 0.7em;">
+            <DraftStateBar
+              :hasDraft="!isCommitting && hasDraft"
+              :tagName="displayTagName"
+              :commitId="appliedCommitId || commitId"
+              :canEditTag="canEditTag"
+              @diff="onDiff"
+              @edit-tag="openTagModal"
+              @clear="onClearDraft"
+            />
+            <div style="margin-left: auto; display: flex; gap: 0;">
+              <button
+                @click="showHistoryModal = true"
+                title="コミット履歴を表示"
+                :style="iconButtonStyle"
+              >
+                <span style="font-size:1.2em; margin:0; padding:0 12px;">🗂️</span>
+                <span class="icon-label">履歴</span>
+              </button>
+              <button
+                @click="openShareModal"
+                title="このコミットを共有"
+                :disabled="isShared || noCommit"
+                :style="{...iconButtonStyle, position: 'relative', opacity: (isShared || noCommit) ? 0.4 : 1}"
+                @mouseenter="onSyncButtonHover"
+                @mouseleave="showSyncTooltip = false"
+              >
+                <span style="font-size:1.2em; margin:0; padding:0 12px;">🌐</span>
+                <span class="icon-label">同期</span>
+                <div v-if="showSyncTooltip" class="sync-tooltip">{{ syncTooltipText }}</div>
+              </button>
+            </div>
+          </div>
+          <div v-if="showHistoryModal">
+            <CommitHistoryModal
+              :show="showHistoryModal"
+              :commitList="filteredCommitList"
+              :sharedCommitIds="sharedCommitIds"
+              @apply="applyCommitToDraftById"
+              @close="showHistoryModal = false"
+            />
+          </div>
+          <div v-if="showTagModal" class="modal-overlay" @click.self="closeTagModal">
+            <div class="modal-content">
+              <h2>タグ付与</h2>
+              <div style="margin-bottom: 1.2em;">
+                <label style="font-weight: bold;">タグ名</label>
+                <input v-model="tagInput" maxlength="50" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="タグ名を入力" :disabled="isTagSubmitting" />
+              </div>
+              <button @click="submitTag" :disabled="isTagSubmitting">
+                <span v-if="isTagSubmitting" class="spinner" style="margin-right:0.7em;"></span>
+                保存
+              </button>
+              <button @click="closeTagModal" :disabled="isTagSubmitting">閉じる</button>
+              <div v-if="isTagSubmitting" class="modal-committing-overlay">
+                <span class="spinner"></span>
+              </div>
+            </div>
+          </div>
+          <div v-if="loading">読み込み中...</div>
+          <div v-else-if="error">エラー: {{ error }}</div>
+          <OrganizationTree :nodes="displayNodes" :maxDepth="5" />
+          <div v-if="showDiff" class="modal-overlay" @click.self="isCommitting ? null : showDiff = false">
+            <div class="modal-content" style="position:relative;">
+              <h2>差分</h2>
+              <div class="modal-scroll-area">
+                <div v-if="diffResult.added.length">
+                  <h3>追加</h3>
+                  <ul>
+                    <li v-for="n in diffResult.added" :key="'a'+n.id" class="diff-added">
+                      <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
+                    </li>
+                  </ul>
+                </div>
+                <div v-if="diffResult.deleted.length">
+                  <h3>削除</h3>
+                  <ul>
+                    <li v-for="n in diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
+                      <span class="diff-sign">ー</span>{{ getNodePath(n, baseFlat) }}
+                    </li>
+                  </ul>
+                </div>
+                <div v-if="diffResult.updated.length">
+                  <h3>変更</h3>
+                  <ul>
+                    <li v-for="n in diffResult.updated" :key="'u'+n.id">
+                      <div class="diff-deleted">
+                        <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), baseFlat) }}
+                      </div>
+                      <div class="diff-added">
+                        <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
+                      </div>
+                    </li>
+                  </ul>
+                </div>
+              </div>
+              <div style="margin-bottom: 1.2em;">
+                <label style="font-weight: bold;">コミットメッセージ</label>
+                <input v-model="commitMessage" maxlength="100" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="コミット内容を入力" :disabled="isCommitting" />
+              </div>
+              <button @click="onCommitFromDiff" :disabled="isCommitting">
+                <span v-if="isCommitting" class="spinner" style="margin-right:0.7em;"></span>
+                コミット
+              </button>
+              <button @click="showDiff = false" :disabled="isCommitting">閉じる</button>
+              <div v-if="isCommitting" class="modal-committing-overlay">
+                <span class="spinner"></span>
+              </div>
+            </div>
+          </div>
+          <ShareModal
+            :show="showShareModal"
+            :onClose="closeShareModal"
+            :currentCommit="{ id: commitId, created_at: commitList.find(c => c.id === commitId)?.created_at || '' }"
+            :sharedCommits="sharedCommits"
+            :loading="shareLoading"
+            :onPush="handlePushShare"
+            :onFetch="handleFetchShare"
+          />
+        </div>
+      </template>
+    </div>
   </div>
 </template>
 
 <style scoped>
 .login-container {
   max-width: 340px;
+  min-width: 240px;
+  width: 100%;
   margin: 80px auto 0 auto;
   background: #fff;
   border-radius: 12px;
   box-shadow: 0 4px 24px rgba(0,0,0,0.13);
-  padding: 2.5em 2em 2em 2em;
+  padding: 2.5em 3em 2em 3em;
   display: flex;
   flex-direction: column;
   align-items: stretch;
@@ -879,7 +900,7 @@ const canEditTag = computed(() => {
   font-size: 1em;
 }
 .login-container button {
-  background: #347474;
+  background: #222;
   color: #fff;
   border: none;
   border-radius: 6px;
@@ -925,8 +946,8 @@ h1 {
 }
 .diff-added,
 .diff-deleted {
-  background: #e6ffed !important;
-  color: #237804 !important;
+  background: #f6f8fa !important;
+  color: #444c56 !important;
   border-radius: 4px;
   margin-bottom: 0.3em;
   padding: 0.2em 0.7em;
@@ -956,7 +977,7 @@ h1 {
   margin-top: 0.4em;
 }
 .diff-btn, .modal-content button {
-  background: #347474;
+  background: #444c56;
   color: #fff !important;
   border: none;
   border-radius: 6px;
@@ -966,10 +987,10 @@ h1 {
   margin: 0.5em 0.5em 0.5em 0;
   cursor: pointer;
   transition: background 0.2s, color 0.2s, box-shadow 0.2s;
-  box-shadow: 0 2px 8px rgba(52,116,116,0.07);
+  box-shadow: 0 2px 8px rgba(60,60,60,0.07);
 }
 .diff-btn:hover, .modal-content button:hover {
-  background: #255a5a;
+  background: #586069;
   color: #fff !important;
 }
 .modal-content button:last-child {
@@ -996,8 +1017,8 @@ h1 {
 .spinner {
   width: 1.3em;
   height: 1.3em;
-  border: 3px solid #347474;
-  border-top: 3px solid #e0e4ea;
+  border: 3px solid #444c56;
+  border-top: 3px solid #d1d5da;
   border-radius: 50%;
   animation: spin 0.7s linear infinite;
   display: inline-block;
@@ -1007,7 +1028,7 @@ h1 {
   100% { transform: rotate(360deg); }
 }
 .modal-content .apply-btn {
-  background: #347474;
+  background: #222;
   color: #fff;
   border: none;
   border-radius: 5px;
@@ -1043,6 +1064,71 @@ h1 {
   text-align: center;
   letter-spacing: 0.05em;
 }
+.app-header {
+  position: fixed;
+  top: 0;
+  left: 0;
+  width: 100vw;
+  height: 56px;
+  background: #2d333b;
+  color: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  z-index: 1200;
+  padding: 0 24px;
+  box-sizing: border-box;
+  min-width: 0;
+  box-shadow: 0 2px 8px rgba(60,60,60,0.07);
+}
+.header-title {
+  font-size: 1.35em;
+  font-weight: bold;
+  letter-spacing: 0.04em;
+  color: #fff;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-user {
+  display: flex;
+  align-items: center;
+  gap: 1.2em;
+  min-width: 0;
+  max-width: 60vw;
+  overflow: hidden;
+}
+.header-username {
+  font-weight: bold;
+  color: #fff;
+  margin-right: 0.5em;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.header-logout {
+  background: #e0e4ea;
+  color: #24292f;
+  border-radius: 6px;
+  border: none;
+  padding: 0.3em 1.2em;
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 1em;
+  transition: background 0.2s, color 0.2s;
+}
+.header-logout:hover {
+  background: #cfd4de;
+  color: #24292f;
+}
+.app-content {
+  width: 100%;
+  margin-top: 56px;
+  /* ヘッダー分下げる */
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
 </style>
 
 <style>
@@ -1070,17 +1156,17 @@ body {
 }
 
 .tree-table th {
-  color: #347474;
+  color: #444c56;
 }
 
 .tree-table td {
   background: #fafdff !important;
-  color: #2d3a4a !important;
+  color: #444c56 !important;
 }
 
 .leaf-cell {
-  background: #e6f7ff !important;
-  color: #1a3a6b !important;
+  background: #f6f8fa !important;
+  color: #444c56 !important;
 }
 
 .parent-cell {
@@ -1095,5 +1181,86 @@ body {
 
 .modal-overlay {
   background: rgba(0,0,0,0.18) !important;
+}
+
+.draft-bar {
+  background: #f6f8fa;
+  border: 1px solid #d1d5da;
+  color: #444c56;
+  padding: 0.7em 1.2em;
+  border-radius: 6px;
+  margin: 1em 0;
+  display: flex;
+  align-items: center;
+  gap: 1em;
+}
+.draft-bar.no-draft {
+  background: #f6f8fa;
+  border: 1px solid #d1d5da;
+  color: #586069;
+}
+.dot {
+  color: #444c56;
+  font-size: 1.2em;
+  margin-right: 0.5em;
+}
+.tag-icon {
+  color: #444c56;
+  margin-right: 0.3em;
+}
+.tag-label {
+  color: #444c56;
+}
+button {
+  background: #444c56;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.4em 1.2em;
+  font-weight: bold;
+  cursor: pointer;
+}
+.tag-display-btn {
+  display: flex;
+  align-items: center;
+  gap: 0.3em;
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 0.2em 0.7em;
+  border-radius: 6px;
+  transition: background 0.18s;
+}
+.tag-display-btn:hover, .tag-display-btn:focus {
+  background: #d1d5da;
+  outline: none;
+}
+.edit-panel button {
+  background: #444c56;
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-weight: bold;
+  font-size: 1em;
+  cursor: pointer;
+  padding: 0.6em 2.2em;
+  margin: 0 0.5em;
+  transition: background 0.2s, box-shadow 0.2s;
+  box-shadow: 0 2px 8px rgba(60,60,60,0.07);
+}
+.edit-panel button:hover {
+  background: #586069;
+}
+.edit-panel button:disabled {
+  background: #b0b8c9;
+  cursor: not-allowed;
+  box-shadow: none;
+}
+.edit-panel button.delete-btn {
+  background: #c43d3d;
+  color: #fff;
+}
+.edit-panel button.delete-btn:hover {
+  background: #a83232;
 }
 </style>

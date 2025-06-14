@@ -13,16 +13,20 @@ const store = useStore()
 const selectedNodeId = computed(() => store.state.selectedNodeId)
 
 // ノードリストをフラット化
-function flatten(nodes: OrgNode[], parentId: string | null = null): OrgNode[] {
+function flattenTree(nodes: OrgNode[]): OrgNode[] {
   const res: OrgNode[] = []
-  function dfs(n: OrgNode, parentId: string | null) {
-    res.push({ ...n, parentId })
-    if (n.children) n.children.forEach(child => dfs(child, n.id))
+  function dfs(n: OrgNode) {
+    res.push(n)
+    if (Array.isArray((n as any).children)) {
+      for (const child of (n as any).children) {
+        dfs(child)
+      }
+    }
   }
-  nodes.forEach(n => dfs(n, parentId))
+  for (const n of nodes) dfs(n)
   return res
 }
-const flatNodes = computed(() => flatten(props.nodes))
+const flatNodes = computed(() => flattenTree(props.nodes))
 
 const modalNode = ref<OrgNode | null>(null)
 const isEdit = ref(true)
@@ -31,25 +35,35 @@ defineExpose({})
 
 // 全てのルートから、各パスごとに行を作る
 function getAllRows(nodes: OrgNode[], maxDepth: number): { row: (string | null)[], nodeId: string, isLeaf: boolean }[] {
+  // フラット配列からツリーを構築
+  const nodeMap: Record<string, OrgNode & { children: OrgNode[] }> = {}
+  nodes.forEach(n => { nodeMap[n.id] = { ...n, children: Array.isArray((n as any).children) ? (n as any).children : [] } })
+  nodes.forEach(n => {
+    if (n.parentId && nodeMap[n.parentId]) {
+      nodeMap[n.parentId].children.push(nodeMap[n.id])
+    }
+  })
+  // ルートノードを抽出
+  const roots = nodes.filter(n => !n.parentId || !nodeMap[n.parentId])
+  // パスを再帰的に構築
   const rows: { row: (string | null)[], nodeId: string, isLeaf: boolean }[] = []
   function dfs(node: OrgNode, path: (string | null)[]) {
     const newPath = [...path]
     newPath[node.depth - 1] = node.name
-    const isLeaf = !node.children || node.children.length === 0
+    // childrenがundefinedでも空配列扱い
+    const children = Array.isArray((node as any).children) ? (node as any).children : []
+    const isLeaf = children.length === 0
     rows.push({ row: newPath, nodeId: node.id, isLeaf })
-    if (node.children && node.children.length > 0) {
-      for (const child of node.children) {
-        dfs(child, newPath)
-      }
+    for (const child of children) {
+      dfs(child, newPath)
     }
   }
-  for (const node of nodes) {
+  for (const node of roots) {
     const path = Array(maxDepth).fill(null)
     dfs(node, path)
   }
   return rows
 }
-
 const tableRows = computed(() => getAllRows(props.nodes, maxDepth))
 
 // その行のノードのdepthを返す
@@ -80,19 +94,24 @@ function onAddChild(parentId: string, parentDepth: number) {
     id: tmpId,
     name: '',
     parentId: parentId,
-    depth: parentDepth + 1,
-    children: []
+    depth: parentDepth + 1
   }
   isEdit.value = false
   store.commit('selectNode', tmpId)
 }
 // ノード編集
-function onUpdateNode(payload: { id: string, name: string, parentId: string | null, depth: number }) {
+async function onUpdateNode(payload: { id: string, name: string, parentId: string | null, depth: number }) {
+  console.log('[onUpdateNode] payload:', payload)
   if (!isEdit.value) {
-    store.dispatch('addNode', payload)
+    const { id, ...addPayload } = payload
+    console.log('[onUpdateNode] addNode payload:', addPayload)
+    await store.dispatch('addNode', addPayload)
   } else {
-    store.dispatch('updateNode', payload)
+    console.log('[onUpdateNode] updateNode payload:', payload)
+    await store.dispatch('updateNode', payload)
   }
+  // draftNodesの内容を確認
+  console.log('[onUpdateNode] draftNodes after update:', store.state.draftNodes)
   onCloseModal()
 }
 // ノード削除

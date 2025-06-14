@@ -50,11 +50,23 @@ export default createStore({
       commit('setDraftNodes', nodes)
     },
     deleteNode({ commit, state }: any, nodeId: string) {
-      // 子ノードも再帰的に削除
-      function removeRecursive(nodes: OrgNode[], id: string): OrgNode[] {
-        return nodes.filter((n: any) => n.id !== id).map((n: any) => ({ ...n, children: n.children ? removeRecursive(n.children, id) : [] }))
+      // 子ノードも再帰的に削除（フラット配列版）
+      function collectDescendants(nodes: OrgNode[], id: string): Set<string> {
+        const ids = new Set<string>([id])
+        let changed = true
+        while (changed) {
+          changed = false
+          for (const n of nodes) {
+            if (n.parentId && ids.has(n.parentId) && !ids.has(n.id)) {
+              ids.add(n.id)
+              changed = true
+            }
+          }
+        }
+        return ids
       }
-      const nodes = removeRecursive(state.draftNodes, nodeId)
+      const idsToRemove = collectDescendants(state.draftNodes, nodeId)
+      const nodes = state.draftNodes.filter((n: any) => !idsToRemove.has(n.id))
       commit('setDraftNodes', nodes)
       if (state.selectedNodeId === nodeId) commit('selectNode', null)
     },
