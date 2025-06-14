@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch, nextTick } from 'vue'
+import { ref, onMounted, computed, watch, nextTick, onUnmounted } from 'vue'
 import { useStore } from 'vuex'
 import OrganizationTree from './components/OrganizationTree.vue'
 import DraftStateBar from './components/DraftStateBar.vue'
@@ -234,6 +234,18 @@ onMounted(() => {
   fetchCommitList()
   checkIsShared()
   fetchSharedCommitIds()
+  // Draftがある場合にbeforeunloadで警告
+  const beforeUnloadHandler = (e: BeforeUnloadEvent) => {
+    if (hasDraft.value) {
+      e.preventDefault()
+      e.returnValue = '未コミットのドラフトデータがあります。本当にページを離れますか？'
+      return e.returnValue
+    }
+  }
+  window.addEventListener('beforeunload', beforeUnloadHandler)
+  onUnmounted(() => {
+    window.removeEventListener('beforeunload', beforeUnloadHandler)
+  })
 })
 
 function flatten(nodes: any[], parentId: string | null = null): any[] {
@@ -615,13 +627,16 @@ const displayTagName = computed(() => {
   // 現在のappliedCommitIdのコミットを取得
   const currentCommit = commitList.value.find(c => c.id === (appliedCommitId.value || commitId.value))
   if (!currentCommit) return tagName.value
-  // 親コミットが共有コミットなら、そのタグ名を表示
-  if (currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
-    // 親コミットのタグ名を取得
-    return parentTagName.value
+  // 親コミットが存在する場合
+  if (currentCommit.parent_commit_id) {
+    const parentCommit = commitList.value.find(c => c.id === currentCommit.parent_commit_id)
+    // 親コミットが他ユーザー作成ならタグを取得して表示
+    if (parentCommit && parentCommit.author !== user.value) {
+      return parentTagName.value
+    }
   }
-  // それ以外は自身のタグ名
-  return tagName.value
+  // それ以外は自身のコミットIDを表示
+  return currentCommit.id
 })
 
 const parentTagName = ref<string | undefined>(undefined)
@@ -653,9 +668,12 @@ watch([
 const canEditTag = computed(() => {
   // 現在のappliedCommitIdのコミットを取得
   const currentCommit = commitList.value.find(c => c.id === (appliedCommitId.value || commitId.value))
-  // 親コミットが共有コミットなら編集不可
-  if (currentCommit && currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
-    return false
+  // 親コミットが存在し、かつ他ユーザー作成なら編集不可
+  if (currentCommit && currentCommit.parent_commit_id) {
+    const parentCommit = commitList.value.find(c => c.id === currentCommit.parent_commit_id)
+    if (parentCommit && parentCommit.author !== user.value) {
+      return false
+    }
   }
   return true
 })
