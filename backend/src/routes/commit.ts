@@ -1,8 +1,23 @@
-import { Router } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import pool from '../db'
 import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 
 const router = Router()
+const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_key'
+
+// JWT認証ミドルウェア
+function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const auth = req.headers.authorization
+  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: '認証が必要です' })
+  try {
+    const payload = jwt.verify(auth.slice(7), JWT_SECRET)
+    ;(req as any).userId = (payload as any).userId
+    next()
+  } catch {
+    res.status(401).json({ error: '認証エラー' })
+  }
+}
 
 // 最新コミット取得
 router.get('/commits/latest', async (_, res) => {
@@ -11,8 +26,9 @@ router.get('/commits/latest', async (_, res) => {
 })
 
 // スナップショット（コミット）作成API
-router.post('/commit', async (req, res) => {
-  const { author, message, nodes, parent_commit_id } = req.body;
+router.post('/commit', authMiddleware, async (req, res) => {
+  const { message, nodes, parent_commit_id, created_at } = req.body;
+  const author = (req as any).userId;
   if (!author || !nodes) {
     return res.status(400).json({ error: 'author, nodesは必須です' });
   }
@@ -21,8 +37,8 @@ router.post('/commit', async (req, res) => {
     await client.query('BEGIN');
     // 1. org_tree 新規作成
     const treeResult = await client.query(
-      'INSERT INTO org_tree (created_at, created_by) VALUES (NOW(), $1) RETURNING id',
-      [author]
+      'INSERT INTO org_tree (created_at, created_by) VALUES ($1, $2) RETURNING id',
+      [created_at ? new Date(created_at) : new Date(), author]
     );
     const tree_id = treeResult.rows[0].id;
     // 2. org_node の再利用 or 新規作成
@@ -64,8 +80,8 @@ router.post('/commit', async (req, res) => {
     }
     // 4. org_commit の作成
     const commitResult = await client.query(
-      'INSERT INTO org_commit (tree_id, message, author, parent_commit_id) VALUES ($1, $2, $3, $4) RETURNING id, created_at',
-      [tree_id, message || null, author, parent_commit_id || null]
+      'INSERT INTO org_commit (tree_id, message, author, parent_commit_id, created_at) VALUES ($1, $2, $3, $4, $5) RETURNING id, created_at',
+      [tree_id, message || null, author, parent_commit_id || null, created_at ? new Date(created_at) : new Date()]
     );
     await client.query('COMMIT');
     res.json({ success: true, commit_id: commitResult.rows[0].id, tree_id, created_at: commitResult.rows[0].created_at });
@@ -77,15 +93,45 @@ router.post('/commit', async (req, res) => {
   }
 });
 
-// コミット一覧取得API
-router.get('/commits', async (_, res) => {
+// コミット一覧取得API（authorで絞り込み対応）
+router.get('/commits', async (req, res) => {
+  const { author, ids } = req.query;
   try {
-    const result = await pool.query(
-      `SELECT c.id, c.message, c.author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
-       FROM org_commit c
-       LEFT JOIN org_tag t ON c.id = t.commit_id
-       ORDER BY c.created_at DESC`
-    );
+    let result;
+    if (ids) {
+      // カンマ区切りのIDリストで取得
+      const idArr = String(ids).split(',').map(s => s.trim()).filter(Boolean)
+      if (idArr.length === 0) return res.json([])
+      result = await pool.query(
+        `SELECT c.id, c.message, u.username as author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
+         FROM org_commit c
+         LEFT JOIN org_tag t ON c.id = t.commit_id
+         LEFT JOIN org_user u ON c.author = u.id
+         WHERE c.id = ANY($1)
+         ORDER BY c.created_at DESC`,
+        [idArr]
+      );
+      return res.json(result.rows)
+    }
+    if (author) {
+      result = await pool.query(
+        `SELECT c.id, c.message, u.username as author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
+         FROM org_commit c
+         LEFT JOIN org_tag t ON c.id = t.commit_id
+         LEFT JOIN org_user u ON c.author = u.id
+         WHERE c.author::uuid = $1::uuid
+         ORDER BY c.created_at DESC`,
+        [author]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT c.id, c.message, u.username as author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
+         FROM org_commit c
+         LEFT JOIN org_tag t ON c.id = t.commit_id
+         LEFT JOIN org_user u ON c.author = u.id
+         ORDER BY c.created_at DESC`
+      );
+    }
     res.json(result.rows);
   } catch (e: any) {
     res.status(500).json({ error: 'コミット一覧取得に失敗しました', detail: e.message });
@@ -102,6 +148,22 @@ router.post('/commit_share', async (req, res) => {
     if (exist.rows.length > 0) {
       return res.status(409).json({ error: 'このコミットは既に共有されています' });
     }
+    // 最新のorg_commit_shareのshared_atを取得
+    const latestShare = await pool.query('SELECT shared_at FROM org_commit_share ORDER BY shared_at DESC LIMIT 1');
+    let latestSharedAt = null;
+    if (latestShare.rows.length > 0) {
+      latestSharedAt = latestShare.rows[0].shared_at;
+    }
+    // 対象コミットのcreated_atを取得
+    const commitRes = await pool.query('SELECT created_at FROM org_commit WHERE id = $1', [commit_id]);
+    if (commitRes.rows.length === 0) {
+      return res.status(400).json({ error: 'commit_idが存在しません' });
+    }
+    const commitCreatedAt = commitRes.rows[0].created_at;
+    // 最新shared_atより新しいcreated_atのみpush許可
+    if (latestSharedAt && commitCreatedAt.getTime() <= new Date(latestSharedAt).getTime()) {
+      return res.status(409).json({ error: '最新の共有コミットと同じかそれ以前の日付のコミットはpushできません' });
+    }
     const result = await pool.query(
       'INSERT INTO org_commit_share (commit_id, note) VALUES ($1, $2) RETURNING *',
       [commit_id, note || null]
@@ -117,10 +179,11 @@ router.get('/commit_share', async (_, res) => {
   try {
     const result = await pool.query(`
       SELECT s.id as share_id, s.commit_id, s.shared_at, s.note,
-             c.message, c.author, c.created_at, t.name as tag_name
+             c.message, u.username as author, c.created_at, c.tree_id, t.name as tag_name
       FROM org_commit_share s
       JOIN org_commit c ON s.commit_id = c.id
       LEFT JOIN org_tag t ON c.id = t.commit_id
+      LEFT JOIN org_user u ON c.author = u.id
       ORDER BY s.shared_at DESC
     `);
     res.json(result.rows);

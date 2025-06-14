@@ -3,16 +3,64 @@ import { defineProps, defineEmits, ref, computed } from 'vue'
 
 const props = defineProps<{
   show: boolean,
-  commitList: { id: string, message: string, author: string, created_at: string, tree_id: string, tag_name?: string | null }[]
+  commitList: { id: string, message: string, author: string, created_at: string, tree_id: string, parent_commit_id?: string | null, tag_name?: string | null }[],
+  sharedCommitIds: string[],
 }>()
 const emit = defineEmits(['apply', 'close', 'share'])
+
+// 親コミットのタグ名キャッシュ
+const parentTagCache = ref<Record<string, string>>({})
+
+// 親コミットが共有コミットなら親のタグを表示するためのマップを作成
+const commitMap = computed(() => {
+  const map: Record<string, any> = {}
+  for (const c of props.commitList) {
+    map[c.id] = c
+  }
+  return map
+})
+
+async function fetchParentTagName(parentId: string) {
+  if (parentTagCache.value[parentId] !== undefined) return parentTagCache.value[parentId]
+  try {
+    const res = await fetch(`http://localhost:3001/api/tags/${parentId}`)
+    if (res.ok) {
+      const tag = await res.json()
+      parentTagCache.value[parentId] = tag?.name || ''
+      return parentTagCache.value[parentId]
+    }
+  } catch {}
+  parentTagCache.value[parentId] = ''
+  return ''
+}
+
+function getDisplayTagName(commit: any) {
+  // 親コミットが共有コミットなら親のタグを表示
+  if (commit.parent_commit_id && props.sharedCommitIds.includes(commit.parent_commit_id)) {
+    const parent = commitMap.value[commit.parent_commit_id]
+    if (parent && parent.tag_name !== undefined) {
+      return parent.tag_name || ''
+    } else {
+      // 親コミットがcommitListにいない場合はAPIで取得
+      if (parentTagCache.value[commit.parent_commit_id] !== undefined) {
+        return parentTagCache.value[commit.parent_commit_id]
+      } else {
+        // 非同期取得（表示時に空→取得後に再描画）
+        fetchParentTagName(commit.parent_commit_id)
+        return ''
+      }
+    }
+  }
+  return commit.tag_name || ''
+}
 
 // タグあり/なしでグループ化（連続したタグなしをまとめる）
 const groupedCommits = computed(() => {
   const groups = []
   let buffer = []
   for (const c of props.commitList) {
-    if (c.tag_name) {
+    const tag = getDisplayTagName(c)
+    if (tag) {
       if (buffer.length > 0) {
         groups.push({ type: 'untagged', commits: [...buffer] })
         buffer = []
@@ -51,7 +99,7 @@ const showUntagged = ref<{ [key: number]: boolean }>({})
                 <tr :key="'tagged-' + group.commit.id" class="tagged-row">
                   <td style="padding:0.5em 0.7em; font-family:monospace; text-align:center;">{{ group.commit.created_at }}</td>
                   <td style="padding:0.5em 0.7em; text-align:center;">{{ group.commit.message || '(メッセージなし)' }}</td>
-                  <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ group.commit.tag_name || '' }}</td>
+                  <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ getDisplayTagName(group.commit) }}</td>
                   <td style="padding:0.5em 0.7em; text-align:center;">{{ group.commit.author }}</td>
                   <td style="padding:0.5em 0.7em; text-align:right;">
                     <button class="history-apply-btn" @click="$emit('apply', group.commit.id)">適用</button>
@@ -68,7 +116,7 @@ const showUntagged = ref<{ [key: number]: boolean }>({})
                 <tr v-for="c in group.commits || []" v-show="showUntagged[idx]" :key="'untagged-' + c.id" style="border-bottom:1px solid #e0e4ea;">
                   <td style="padding:0.5em 0.7em; font-family:monospace; text-align:center;">{{ c.created_at }}</td>
                   <td style="padding:0.5em 0.7em; text-align:center;">{{ c.message || '(メッセージなし)' }}</td>
-                  <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ c.tag_name || '' }}</td>
+                  <td style="padding:0.5em 0.7em; color:#347474; font-family:monospace; text-align:center;">{{ getDisplayTagName(c) }}</td>
                   <td style="padding:0.5em 0.7em; text-align:center;">{{ c.author }}</td>
                   <td style="padding:0.5em 0.7em; text-align:right;">
                     <button class="history-apply-btn" @click="$emit('apply', c.id)">適用</button>

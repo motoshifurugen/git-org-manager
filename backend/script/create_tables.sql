@@ -46,3 +46,9 @@ create table if not exists org_commit_share (
   shared_at timestamp default current_timestamp,
   note text
 ); 
+
+ALTER TABLE org_commit
+  ALTER COLUMN author TYPE uuid USING author::uuid;
+
+ALTER TABLE org_commit
+  ADD CONSTRAINT fk_author_user FOREIGN KEY (author) REFERENCES org_user(id);

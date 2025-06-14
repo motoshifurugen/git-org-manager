@@ -12,10 +12,26 @@ const props = defineProps<{
 }>()
 const emit = defineEmits(['close', 'push', 'fetch'])
 
-// 現在のコミットより新しい共有コミットがあるか
+// 現在のコミットより新しい共有コミットがあるか、または同じ日時の場合もpush不可
 const hasNewerShared = computed(() => {
-  if (!props.currentCommit?.created_at) return false
-  return props.sharedCommits.some(s => s.created_at > props.currentCommit.created_at)
+  if (!props.currentCommit?.created_at || !props.sharedCommits.length) return false
+  // 最新のshared_at（string）を取得
+  const maxSharedAt = props.sharedCommits.reduce((max: string, s) => {
+    return (!max || s.shared_at > max) ? s.shared_at : max
+  }, '')
+  if (!maxSharedAt) return false
+  // created_atがmaxSharedAtと同じかそれ以前ならpush不可
+  return new Date(props.currentCommit.created_at).getTime() <= new Date(maxSharedAt).getTime()
+})
+
+// 日付が完全一致する場合
+const hasSameDate = computed(() => {
+  if (!props.currentCommit?.created_at || !props.sharedCommits.length) return false
+  const maxSharedAt = props.sharedCommits.reduce((max: string, s) => {
+    return (!max || s.shared_at > max) ? s.shared_at : max
+  }, '')
+  if (!maxSharedAt) return false
+  return new Date(props.currentCommit.created_at).getTime() === new Date(maxSharedAt).getTime()
 })
 </script>
 
@@ -27,10 +43,15 @@ const hasNewerShared = computed(() => {
       <template v-else>
         <div v-if="hasNewerShared">
           <div style="margin-bottom:1.2em; color:#c41d7f; font-weight:bold;">
-            現在のコミットより新しい共有コミットが存在します。<br>
-            最新の共有コミットをfetchして適用できます。
+            <template v-if="hasSameDate">
+              最新に同期済みです。
+            </template>
+            <template v-else>
+              現在のコミットより新しい共有コミットが存在します。<br>
+              最新の共有コミットをfetchして適用できます。
+            </template>
           </div>
-          <button @click="props.onFetch" style="background:#347474;color:#fff;">fetch（取得）</button>
+          <button v-if="!hasSameDate" @click="props.onFetch" style="background:#347474;color:#fff;">fetch（取得）</button>
         </div>
         <div v-else>
           <div style="margin-bottom:1.2em; color:#347474; font-weight:bold;">

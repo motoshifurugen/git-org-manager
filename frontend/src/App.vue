@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useStore } from 'vuex'
 import OrganizationTree from './components/OrganizationTree.vue'
 import DraftStateBar from './components/DraftStateBar.vue'
@@ -10,7 +10,7 @@ import type { CSSProperties } from 'vue'
 
 const store = useStore()
 const treeId = ref('')
-const treeNodes = ref([])
+const treeNodes = ref<any[]>([])
 const loading = ref(true)
 const error = ref('')
 const showDiff = ref(false)
@@ -32,6 +32,24 @@ const showShareModal = ref(false)
 const sharedCommits = ref<any[]>([])
 const shareLoading = ref(false)
 const showSyncTooltip = ref(false)
+const syncTooltipText = computed(() => {
+  if (hasDraft.value) return '未コミットの変更があります'
+  if (isShared.value) return '最新に同期されています'
+  return ''
+})
+const user = ref<string>(localStorage.getItem('user') || '')
+const userId = ref<string>(localStorage.getItem('userId') || '')
+const token = ref<string>(localStorage.getItem('token') || '')
+const loginName = ref('')
+const loginPassword = ref('')
+const loginError = ref('')
+const isLoggingIn = ref(false)
+const noCommit = ref(false)
+const latestSharedCommit = ref<any>(null)
+const showFetchCompare = ref(false)
+const fetchedDraftNodes = ref<any[]>([])
+const loadingMerge = ref(false)
+const sharedCommitIds = ref<string[]>([])
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -81,17 +99,38 @@ const displayNodes = computed(() => {
 
 async function fetchLatestTree() {
   loading.value = true
+  noCommit.value = false
   try {
-    const commitRes = await fetch('http://localhost:3001/api/commits/latest')
+    // 自分の最新コミットのみ取得
+    const userId = localStorage.getItem('userId') || ''
+    const commitRes = await fetch(`http://localhost:3001/api/commits?author=${encodeURIComponent(userId)}`)
     if (!commitRes.ok) throw new Error('最新コミット取得失敗')
-    const commit = await commitRes.json()
+    const commits = await commitRes.json()
+    if (!commits.length) {
+      // コミットがない場合は最新の共有コミットを取得
+      noCommit.value = true
+      // 最新のorg_commit_shareを取得
+      const shareRes = await fetch('http://localhost:3001/api/commit_share')
+      if (shareRes.ok) {
+        const shares = await shareRes.json()
+        latestSharedCommit.value = shares.length ? shares[0] : null
+      } else {
+        latestSharedCommit.value = null
+      }
+      // ローカルドラフトも空にする（初回fetch時の左側を空表に）
+      store.commit('setDraftNodes', [])
+      console.log('noCommit', noCommit.value)
+      return
+    }
+    const commit = commits[0] // 最新（created_at DESC）
     commitId.value = commit.id
     treeId.value = commit.tree_id
     const treeRes = await fetch(`http://localhost:3001/api/trees/${treeId.value}`)
     if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
     const treeData = await treeRes.json()
     treeNodes.value = treeData.nodes
-    store.commit('setDraftNodes', flatten(treeData.nodes))
+    store.commit('setDraftNodes', treeData.nodes)
+    await fetchCommitList()
   } catch (e: any) {
     error.value = e.message || '不明なエラー'
   } finally {
@@ -101,8 +140,9 @@ async function fetchLatestTree() {
 
 async function fetchCommitList() {
   try {
-    const res = await fetch('http://localhost:3001/api/commits')
-    commitList.value = await res.json()
+    // 自分のコミットのみ取得
+    const myCommits = await store.dispatch('fetchMyCommits')
+    commitList.value = myCommits
   } catch (e) {
     // 必要ならエラー処理
   }
@@ -112,11 +152,16 @@ watch(commitId, (v) => { appliedCommitId.value = v })
 
 // parent_commit_idを辿って現在のappliedCommitIdから到達可能な履歴のみをリストアップ
 const filteredCommitList = computed(() => {
+  const myUserName = user.value // ログインユーザー名
   const map = new Map(commitList.value.map(c => [c.id, c]))
   const result = []
   let cur = map.get(appliedCommitId.value)
+  // 1つ目（現在のコミット）はスキップし、親から履歴をたどる
+  if (cur) cur = cur.parent_commit_id ? map.get(cur.parent_commit_id) : undefined
   while (cur) {
-    result.push(cur)
+    if (cur.author === myUserName) {
+      result.push(cur)
+    }
     cur = cur.parent_commit_id ? map.get(cur.parent_commit_id) : undefined
   }
   return result
@@ -127,7 +172,7 @@ async function applyCommitToDraftById(commitId: string) {
   if (!commit) return
   const treeRes = await fetch(`http://localhost:3001/api/trees/${commit.tree_id}`)
   const treeData = await treeRes.json()
-  store.commit('setDraftNodes', flatten(treeData.nodes))
+  store.commit('setDraftNodes', treeData.nodes)
   showToast('選択したコミット内容をドラフトに適用しました', 'success')
   appliedCommitId.value = commitId
   showHistoryModal.value = false
@@ -142,6 +187,7 @@ async function checkIsShared() {
   } catch {
     isShared.value = false
   }
+  console.log('isShared', isShared.value)
 }
 
 watch(commitId, () => { checkIsShared() })
@@ -150,22 +196,35 @@ onMounted(() => {
   fetchLatestTree()
   fetchCommitList()
   checkIsShared()
+  fetchSharedCommitIds()
 })
 
 function flatten(nodes: any[], parentId: string | null = null): any[] {
   const res: any[] = []
+  const visited = new Set()
   function dfs(n: any, parentId: string | null) {
-    res.push({ ...n, parentId })
+    if (visited.has(String(n.id))) return
+    visited.add(String(n.id))
+    res.push({ ...n, id: String(n.id), parentId: parentId == null ? null : String(parentId) })
     if (n.children) (n.children as any[]).forEach((child: any) => dfs(child, n.id))
   }
   nodes.forEach((n: any) => dfs(n, parentId))
   return res
 }
 
+function nodeForCompare(n: any) {
+  return {
+    id: String(n.id),
+    name: String(n.name),
+    parentId: n.parentId == null ? null : String(n.parentId),
+    depth: n.depth == null ? null : Number(n.depth),
+  }
+}
+
 function calcDiff(baseNodes: any[], draftNodes: any[]): { added: any[]; updated: any[]; deleted: any[] } {
-  // baseNodes: ネスト構造 → フラット化
-  const baseFlat = flatten(baseNodes)
-  const draftFlat = draftNodes // こちらは既にフラット
+  // flatten不要
+  const baseFlat = baseNodes.map(nodeForCompare)
+  const draftFlat = draftNodes.map(nodeForCompare)
   const baseMap = baseFlat.reduce((acc: Record<string, any>, n: any) => { acc[n.id] = n; return acc }, {} as Record<string, any>)
   const draftMap = draftFlat.reduce((acc: Record<string, any>, n: any) => { acc[n.id] = n; return acc }, {} as Record<string, any>)
   const added = draftFlat.filter((n: any) => !baseMap[n.id])
@@ -250,7 +309,7 @@ async function fetchTagName(commitId: string) {
 }
 
 watch(
-  [() => hasDraft.value, () => commitId.value],
+  [() => hasDraft.value, () => appliedCommitId.value],
   ([draft, cid]) => {
     if (!draft && cid) {
       fetchTagName(cid)
@@ -367,6 +426,34 @@ function handleFetchShare() {
   showToast('fetch機能は未実装です', 'error')
 }
 
+async function fetchLatestSharedCommit() {
+  if (!latestSharedCommit.value || !latestSharedCommit.value.tree_id) {
+    showToast('共有コミットのtree_idが取得できません', 'error')
+    return
+  }
+  try {
+    const treeRes = await fetch(`http://localhost:3001/api/trees/${latestSharedCommit.value.tree_id}`)
+    if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
+    const treeData = await treeRes.json()
+    fetchedDraftNodes.value = flatten(treeData.nodes)
+    showFetchCompare.value = true
+  } catch (e: any) {
+    showToast('共有コミットのfetchに失敗しました', 'error')
+  }
+}
+
+function onSyncFetchClick() {
+  if (hasDraft.value) {
+    showToast('未コミットの変更があります', 'error')
+    return
+  }
+  fetchLatestSharedCommit()
+}
+
+function onSyncButtonHover() {
+  showSyncTooltip.value = !!(hasDraft.value || isShared.value)
+}
+
 const iconButtonStyle = computed<CSSProperties>(() => ({
   background: 'none',
   border: 'none',
@@ -381,138 +468,436 @@ const iconButtonStyle = computed<CSSProperties>(() => ({
   minWidth: 'unset',
   minHeight: 'unset',
 }))
+
+async function handleLogin(isRegister = false) {
+  loginError.value = ''
+  isLoggingIn.value = true
+  try {
+    const url = isRegister ? 'http://localhost:3001/api/register' : 'http://localhost:3001/api/login'
+    const res = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ username: loginName.value, password: loginPassword.value })
+    })
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}))
+      loginError.value = err?.error || (isRegister ? '登録失敗' : 'ログイン失敗')
+      return
+    }
+    const data = await res.json()
+    user.value = loginName.value
+    userId.value = data.userId
+    token.value = data.token || ''
+    localStorage.setItem('user', user.value)
+    localStorage.setItem('userId', userId.value)
+    localStorage.setItem('token', token.value)
+    loginName.value = ''
+    loginPassword.value = ''
+  } catch (e) {
+    loginError.value = '通信エラー'
+  } finally {
+    isLoggingIn.value = false
+  }
+}
+
+function handleLogout() {
+  user.value = ''
+  userId.value = ''
+  token.value = ''
+  localStorage.removeItem('user')
+  localStorage.removeItem('userId')
+  localStorage.removeItem('token')
+}
+
+async function onMergeClick() {
+  if (!fetchedDraftNodes.value.length) {
+    showToast('マージ対象がありません', 'error')
+    return
+  }
+  loadingMerge.value = true
+  try {
+    // 1. fetchした内容をローカルドラフトに上書き
+    store.commit('setDraftNodes', [...fetchedDraftNodes.value])
+
+    // 2. 差分判定（flatten不要！）
+    const base = fetchedDraftNodes.value.map(nodeForCompare)
+    const draft = store.state.draftNodes.map(nodeForCompare)
+    // デバッグ: 差分の詳細出力
+    for (let i = 0; i < base.length; i++) {
+      const b = base[i]
+      const d = draft.find((n: any) => n.id === b.id)
+      if (!d) {
+        console.log('draftに存在しない', b)
+        continue
+      }
+      if (b.name !== d.name) console.log('name違い', b, d)
+      if (b.parentId !== d.parentId) console.log('parentId違い', b, d)
+      if (b.depth !== d.depth) console.log('depth違い', b, d)
+    }
+    const diff = calcDiff(base, draft)
+    console.log('updated diff', diff.updated)
+    const isNoDiff = diff.added.length === 0 && diff.updated.length === 0 && diff.deleted.length === 0
+
+    // 3. ツリー表示用にも反映
+    treeNodes.value = [...fetchedDraftNodes.value]
+
+    if (isNoDiff) {
+      if (latestSharedCommit.value && latestSharedCommit.value.commit_id) {
+        try {
+          // 親コミットのcreated_atを取得
+          const commitRes = await fetch(`http://localhost:3001/api/commits?id=${latestSharedCommit.value.commit_id}`)
+          const commits = await commitRes.json()
+          const parentCommit = Array.isArray(commits) ? commits[0] : commits
+          const parentCreatedAt = parentCommit?.created_at
+
+          const autoMessage = latestSharedCommit.value.message || 'fetch取り込み自動コミット'
+          const res = await store.dispatch('commitDraft', {
+            treeId: latestSharedCommit.value.tree_id,
+            author: user.value || 'auto',
+            message: autoMessage,
+            parent_commit_id: latestSharedCommit.value.commit_id,
+            created_at: latestSharedCommit.value.shared_at // org_commit_shareのshared_atをコピー
+          })
+          store.commit('clearDraft')
+          // 親コミットのタグを新コミットにも付与
+          if (latestSharedCommit.value && latestSharedCommit.value.tag_name) {
+            try {
+              const token = localStorage.getItem('token') || ''
+              await fetch('http://localhost:3001/api/tags', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify({ commit_id: res.commit_id, name: latestSharedCommit.value.tag_name })
+              })
+            } catch (e) {
+              // タグ付与失敗時は無視
+            }
+          }
+          showToast('差分がないため、自動コミットを作成しました', 'success')
+          await fetchLatestTree()
+          await fetchCommitList()
+          appliedCommitId.value = res.commit_id
+          noCommit.value = false
+        } catch (e) {
+          showToast('自動コミット作成に失敗しました', 'error')
+        }
+      } else {
+        showToast('共有コミットIDが取得できません', 'error')
+      }
+      showFetchCompare.value = false
+      fetchedDraftNodes.value = []
+      return
+    }
+    appliedCommitId.value = ''
+    showToast('fetchした内容をドラフトに反映しました', 'success')
+    showFetchCompare.value = false
+    fetchedDraftNodes.value = []
+    console.log('appliedCommitId', appliedCommitId.value)
+  } finally {
+    loadingMerge.value = false
+  }
+}
+
+function onCancelFetchCompare() {
+  fetchedDraftNodes.value = []
+  showFetchCompare.value = false
+}
+
+async function fetchSharedCommitIds() {
+  try {
+    const res = await fetch('http://localhost:3001/api/commit_share')
+    if (res.ok) {
+      const shares = await res.json()
+      sharedCommitIds.value = shares.map((s: any) => s.commit_id)
+    } else {
+      sharedCommitIds.value = []
+    }
+  } catch {
+    sharedCommitIds.value = []
+  }
+}
+
+const displayTagName = computed(() => {
+  // 現在のappliedCommitIdのコミットを取得
+  const currentCommit = commitList.value.find(c => c.id === (appliedCommitId.value || commitId.value))
+  if (!currentCommit) return tagName.value
+  // 親コミットが共有コミットなら、そのタグ名を表示
+  if (currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
+    // 親コミットのタグ名を取得
+    return parentTagName.value
+  }
+  // それ以外は自身のタグ名
+  return tagName.value
+})
+
+const parentTagName = ref<string | undefined>(undefined)
+watch([
+  () => appliedCommitId.value,
+  () => commitList.value.length,
+  () => sharedCommitIds.value.length
+], async ([cid]) => {
+  const currentCommit = commitList.value.find(c => c.id === (cid || commitId.value))
+  if (currentCommit && currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
+    // 親コミットのタグ名を取得
+    try {
+      const res = await fetch(`http://localhost:3001/api/tags/${currentCommit.parent_commit_id}`)
+      if (res.ok) {
+        const tag = await res.json()
+        parentTagName.value = tag?.name || undefined
+      } else {
+        parentTagName.value = undefined
+      }
+    } catch {
+      parentTagName.value = undefined
+    }
+  } else {
+    parentTagName.value = undefined
+  }
+}, { immediate: true })
+
+// タグ編集可否のcomputedを追加
+const canEditTag = computed(() => {
+  // 現在のappliedCommitIdのコミットを取得
+  const currentCommit = commitList.value.find(c => c.id === (appliedCommitId.value || commitId.value))
+  // 親コミットが共有コミットなら編集不可
+  if (currentCommit && currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
+    return false
+  }
+  return true
+})
 </script>
 
 <template>
-  <div>
-    <ToastMessage
-      v-if="toast"
-      :message="toast.message"
-      :type="toast.type"
-      @close="toast = null"
-    />
-    <h1>組織構造ツリー</h1>
-    <div style="display: flex; align-items: center; margin-bottom: 0.7em;">
-      <DraftStateBar
-        :hasDraft="!isCommitting && hasDraft"
-        :tagName="tagName"
-        :commitId="commitId"
-        @diff="onDiff"
-        @edit-tag="openTagModal"
-        @clear="onClearDraft"
+  <div style="display:flex; flex-direction:column; align-items:flex-start; min-height:100vh;">
+    <template v-if="!userId">
+      <div class="login-container">
+        <h2>ログイン</h2>
+        <input v-model="loginName" placeholder="ユーザー名" :disabled="isLoggingIn" />
+        <input v-model="loginPassword" type="password" placeholder="パスワード" :disabled="isLoggingIn" />
+        <div style="margin: 0.7em 0; color: #c41d7f; min-height: 1.5em;">{{ loginError }}</div>
+        <button @click="handleLogin(false)" :disabled="isLoggingIn">ログイン</button>
+        <button @click="handleLogin(true)" :disabled="isLoggingIn">新規登録</button>
+      </div>
+    </template>
+    <template v-else>
+      <div style="display:flex; align-items:center; justify-content: flex-end; margin-bottom: 0.5em; width:100%;">
+        <span style="margin-right:1em; font-weight:bold;">👤 {{ user }}</span>
+        <button @click="handleLogout" style="background:#e0e4ea; color:#2d3a4a; border-radius:6px; border:none; padding:0.3em 1.2em; cursor:pointer;">ログアウト</button>
+      </div>
+      <ToastMessage
+        v-if="toast"
+        :message="toast.message"
+        :type="toast.type"
+        @close="toast = null"
       />
-      <div style="margin-left: auto; display: flex; gap: 0;">
+      <div v-if="showFetchCompare && fetchedDraftNodes">
+        <div style="max-width:100vw; box-sizing:border-box; padding:0 2vw; margin:0 auto; width:100%; overflow-x:auto; position:relative;">
+          <div v-if="loadingMerge" style="position:absolute; left:0; top:0; width:100%; height:100%; background:rgba(255,255,255,0.7); z-index:20; display:flex; align-items:center; justify-content:center;">
+            <span class="spinner" style="width:3em; height:3em; border-width:6px;"></span>
+          </div>
+          <div style="display: flex; gap: 2em; width:100%; align-items: center;">
+            <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <h2 style="margin:0;">自分の最新コミット</h2>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:60px;">
+              <div style="display:flex; gap:0.7em; align-items:center;">
+                <button @click="onMergeClick" style="display:flex; align-items:center; justify-content:center; background: #347474; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
+                  <span style="font-size:1em; margin-right:0.5em;">←</span>merge
+                </button>
+                <button @click="onCancelFetchCompare" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
+              </div>
+            </div>
+            <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <h2 style="margin:0;">fetchした共有コミット</h2>
+            </div>
+          </div>
+          <div style="display: flex; gap: 2em; width:100%;">
+            <div style="flex: 1; min-width:0;">
+              <OrganizationTree :nodes="unflatten(store.state.draftNodes)" :maxDepth="5" />
+            </div>
+            <div style="flex: 1; min-width:0;">
+              <OrganizationTree :nodes="unflatten(fetchedDraftNodes)" :maxDepth="5" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="noCommit && !hasDraft && !appliedCommitId" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
+        <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.7em;">まだコミットがありません</div>
         <button
-          @click="showHistoryModal = true"
-          title="コミット履歴を表示"
-          :style="iconButtonStyle"
-        >
-          <span style="font-size:1.2em; margin:0; padding:0 12px;">🗂️</span>
-          <span class="icon-label">履歴</span>
-        </button>
-        <button
-          @click="openShareModal"
-          title="このコミットを共有"
-          :disabled="isShared"
-          :style="{...iconButtonStyle, position: 'relative', opacity: isShared ? 0.4 : 1}"
-          @mouseenter="showSyncTooltip = isShared"
-          @mouseleave="showSyncTooltip = false"
-        >
-          <span style="font-size:1.2em; margin:0; padding:0 12px;">🌐</span>
-          <span class="icon-label">同期</span>
-          <div v-if="showSyncTooltip" class="sync-tooltip">最新に同期されています</div>
-        </button>
+          v-if="latestSharedCommit"
+          @click="onSyncFetchClick"
+          :disabled="hasDraft"
+          style="background:#347474; color:#fff; border:none; border-radius:6px; padding:0.6em 1.5em; font-weight:600; font-size:1em;"
+        >最新の共有コミットをfetch</button>
+        <div v-else style="color:#c41d7f;">共有コミットが存在しません</div>
       </div>
-    </div>
-    <div v-if="showHistoryModal">
-      <CommitHistoryModal
-        :show="showHistoryModal"
-        :commitList="filteredCommitList"
-        @apply="applyCommitToDraftById"
-        @close="showHistoryModal = false"
-      />
-    </div>
-    <div v-if="showTagModal" class="modal-overlay" @click.self="closeTagModal">
-      <div class="modal-content">
-        <h2>タグ付与</h2>
-        <div style="margin-bottom: 1.2em;">
-          <label style="font-weight: bold;">タグ名</label>
-          <input v-model="tagInput" maxlength="50" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="タグ名を入力" :disabled="isTagSubmitting" />
-        </div>
-        <button @click="submitTag" :disabled="isTagSubmitting">
-          <span v-if="isTagSubmitting" class="spinner" style="margin-right:0.7em;"></span>
-          保存
-        </button>
-        <button @click="closeTagModal" :disabled="isTagSubmitting">閉じる</button>
-        <div v-if="isTagSubmitting" class="modal-committing-overlay">
-          <span class="spinner"></span>
-        </div>
-      </div>
-    </div>
-    <div v-if="loading">読み込み中...</div>
-    <div v-else-if="error">エラー: {{ error }}</div>
-    <OrganizationTree :nodes="displayNodes" :maxDepth="5" />
-    <div v-if="showDiff" class="modal-overlay" @click.self="isCommitting ? null : showDiff = false">
-      <div class="modal-content" style="position:relative;">
-        <h2>差分</h2>
-        <div class="modal-scroll-area">
-          <div v-if="diffResult.added.length">
-            <h3>追加</h3>
-            <ul>
-              <li v-for="n in diffResult.added" :key="'a'+n.id" class="diff-added">
-                <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
-              </li>
-            </ul>
-          </div>
-          <div v-if="diffResult.deleted.length">
-            <h3>削除</h3>
-            <ul>
-              <li v-for="n in diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
-                <span class="diff-sign">ー</span>{{ getNodePath(n, baseFlat) }}
-              </li>
-            </ul>
-          </div>
-          <div v-if="diffResult.updated.length">
-            <h3>変更</h3>
-            <ul>
-              <li v-for="n in diffResult.updated" :key="'u'+n.id">
-                <div class="diff-deleted">
-                  <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), baseFlat) }}
-                </div>
-                <div class="diff-added">
-                  <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
-                </div>
-              </li>
-            </ul>
+      <div v-else style="width:100%">
+        <h1>組織構造ツリー</h1>
+        <div style="display: flex; align-items: center; margin-bottom: 0.7em;">
+          <DraftStateBar
+            :hasDraft="!isCommitting && hasDraft"
+            :tagName="displayTagName"
+            :commitId="appliedCommitId || commitId"
+            :canEditTag="canEditTag"
+            @diff="onDiff"
+            @edit-tag="openTagModal"
+            @clear="onClearDraft"
+          />
+          <div style="margin-left: auto; display: flex; gap: 0;">
+            <button
+              @click="showHistoryModal = true"
+              title="コミット履歴を表示"
+              :style="iconButtonStyle"
+            >
+              <span style="font-size:1.2em; margin:0; padding:0 12px;">🗂️</span>
+              <span class="icon-label">履歴</span>
+            </button>
+            <button
+              @click="openShareModal"
+              title="このコミットを共有"
+              :disabled="isShared || noCommit"
+              :style="{...iconButtonStyle, position: 'relative', opacity: (isShared || noCommit) ? 0.4 : 1}"
+              @mouseenter="onSyncButtonHover"
+              @mouseleave="showSyncTooltip = false"
+            >
+              <span style="font-size:1.2em; margin:0; padding:0 12px;">🌐</span>
+              <span class="icon-label">同期</span>
+              <div v-if="showSyncTooltip" class="sync-tooltip">{{ syncTooltipText }}</div>
+            </button>
           </div>
         </div>
-        <div style="margin-bottom: 1.2em;">
-          <label style="font-weight: bold;">コミットメッセージ</label>
-          <input v-model="commitMessage" maxlength="100" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="コミット内容を入力" :disabled="isCommitting" />
+        <div v-if="showHistoryModal">
+          <CommitHistoryModal
+            :show="showHistoryModal"
+            :commitList="filteredCommitList"
+            :sharedCommitIds="sharedCommitIds"
+            @apply="applyCommitToDraftById"
+            @close="showHistoryModal = false"
+          />
         </div>
-        <button @click="onCommitFromDiff" :disabled="isCommitting">
-          <span v-if="isCommitting" class="spinner" style="margin-right:0.7em;"></span>
-          コミット
-        </button>
-        <button @click="showDiff = false" :disabled="isCommitting">閉じる</button>
-        <div v-if="isCommitting" class="modal-committing-overlay">
-          <span class="spinner"></span>
+        <div v-if="showTagModal" class="modal-overlay" @click.self="closeTagModal">
+          <div class="modal-content">
+            <h2>タグ付与</h2>
+            <div style="margin-bottom: 1.2em;">
+              <label style="font-weight: bold;">タグ名</label>
+              <input v-model="tagInput" maxlength="50" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="タグ名を入力" :disabled="isTagSubmitting" />
+            </div>
+            <button @click="submitTag" :disabled="isTagSubmitting">
+              <span v-if="isTagSubmitting" class="spinner" style="margin-right:0.7em;"></span>
+              保存
+            </button>
+            <button @click="closeTagModal" :disabled="isTagSubmitting">閉じる</button>
+            <div v-if="isTagSubmitting" class="modal-committing-overlay">
+              <span class="spinner"></span>
+            </div>
+          </div>
         </div>
+        <div v-if="loading">読み込み中...</div>
+        <div v-else-if="error">エラー: {{ error }}</div>
+        <OrganizationTree :nodes="displayNodes" :maxDepth="5" />
+        <div v-if="showDiff" class="modal-overlay" @click.self="isCommitting ? null : showDiff = false">
+          <div class="modal-content" style="position:relative;">
+            <h2>差分</h2>
+            <div class="modal-scroll-area">
+              <div v-if="diffResult.added.length">
+                <h3>追加</h3>
+                <ul>
+                  <li v-for="n in diffResult.added" :key="'a'+n.id" class="diff-added">
+                    <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
+                  </li>
+                </ul>
+              </div>
+              <div v-if="diffResult.deleted.length">
+                <h3>削除</h3>
+                <ul>
+                  <li v-for="n in diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
+                    <span class="diff-sign">ー</span>{{ getNodePath(n, baseFlat) }}
+                  </li>
+                </ul>
+              </div>
+              <div v-if="diffResult.updated.length">
+                <h3>変更</h3>
+                <ul>
+                  <li v-for="n in diffResult.updated" :key="'u'+n.id">
+                    <div class="diff-deleted">
+                      <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), baseFlat) }}
+                    </div>
+                    <div class="diff-added">
+                      <span class="diff-sign">＋</span>{{ getNodePath(n, baseFlat) }}
+                    </div>
+                  </li>
+                </ul>
+              </div>
+            </div>
+            <div style="margin-bottom: 1.2em;">
+              <label style="font-weight: bold;">コミットメッセージ</label>
+              <input v-model="commitMessage" maxlength="100" style="width: 100%; margin-top: 0.5em; padding: 0.5em; border-radius: 6px; border: 1px solid #d0d6e1; font-size: 1em;" placeholder="コミット内容を入力" :disabled="isCommitting" />
+            </div>
+            <button @click="onCommitFromDiff" :disabled="isCommitting">
+              <span v-if="isCommitting" class="spinner" style="margin-right:0.7em;"></span>
+              コミット
+            </button>
+            <button @click="showDiff = false" :disabled="isCommitting">閉じる</button>
+            <div v-if="isCommitting" class="modal-committing-overlay">
+              <span class="spinner"></span>
+            </div>
+          </div>
+        </div>
+        <ShareModal
+          :show="showShareModal"
+          :onClose="closeShareModal"
+          :currentCommit="{ id: commitId, created_at: commitList.find(c => c.id === commitId)?.created_at || '' }"
+          :sharedCommits="sharedCommits"
+          :loading="shareLoading"
+          :onPush="handlePushShare"
+          :onFetch="handleFetchShare"
+        />
       </div>
-    </div>
-    <ShareModal
-      :show="showShareModal"
-      :onClose="closeShareModal"
-      :currentCommit="{ id: commitId, created_at: commitList.find(c => c.id === commitId)?.created_at || '' }"
-      :sharedCommits="sharedCommits"
-      :loading="shareLoading"
-      :onPush="handlePushShare"
-      :onFetch="handleFetchShare"
-    />
+    </template>
   </div>
 </template>
 
 <style scoped>
+.login-container {
+  max-width: 340px;
+  margin: 80px auto 0 auto;
+  background: #fff;
+  border-radius: 12px;
+  box-shadow: 0 4px 24px rgba(0,0,0,0.13);
+  padding: 2.5em 2em 2em 2em;
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+}
+.login-container input {
+  margin-bottom: 1em;
+  padding: 0.7em;
+  border-radius: 6px;
+  border: 1px solid #d0d6e1;
+  font-size: 1em;
+}
+.login-container button {
+  background: #347474;
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 0.6em 1.5em;
+  font-weight: 600;
+  font-size: 1em;
+  margin-bottom: 0.7em;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.login-container button:last-child {
+  background: #e0e4ea;
+  color: #2d3a4a;
+}
+.login-container button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
 h1 {
   font-size: 1.5em;
   margin-bottom: 1em;

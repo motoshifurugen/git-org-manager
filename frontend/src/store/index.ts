@@ -12,14 +12,12 @@ export interface State {
   count: number
   draftNodes: OrgNode[]
   selectedNodeId: string | null
-  hasDraft: boolean
 }
 
 const state: State = {
   count: 0,
   draftNodes: [],
   selectedNodeId: null,
-  hasDraft: false
 }
 
 export default createStore({
@@ -36,7 +34,6 @@ export default createStore({
     },
     clearDraft(state: State) {
       state.draftNodes = []
-      state.hasDraft = false
     }
   },
   actions: {
@@ -61,12 +58,16 @@ export default createStore({
       commit('setDraftNodes', nodes)
       if (state.selectedNodeId === nodeId) commit('selectNode', null)
     },
-    commitDraft({ commit, state }: any, { treeId, author, message, parent_commit_id }: { treeId: string, author: string, message?: string, parent_commit_id?: string }) {
+    commitDraft({ commit, state }: any, { treeId, author, message, parent_commit_id, created_at }: { treeId: string, author: string, message?: string, parent_commit_id?: string, created_at?: string }) {
       // API保存処理
+      const token = localStorage.getItem('token') || ''
       return fetch('http://localhost:3001/api/commit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tree_id: treeId, author, message, nodes: state.draftNodes, parent_commit_id })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ tree_id: treeId, message, nodes: state.draftNodes, parent_commit_id, created_at })
       })
         .then(res => {
           if (!res.ok) throw new Error('コミットAPI失敗')
@@ -75,6 +76,33 @@ export default createStore({
         .then(data => {
           commit('clearDraft')
           return data
+        })
+    },
+    fetchMyCommits({ commit }: any) {
+      const userId = localStorage.getItem('userId') || ''
+      return fetch(`http://localhost:3001/api/commits?author=${encodeURIComponent(userId)}`)
+        .then(res => {
+          if (!res.ok) throw new Error('コミット一覧取得失敗')
+          return res.json()
+        })
+        .then(async (myCommits) => {
+          // 親コミットID一覧を抽出
+          const parentIds = Array.from(new Set(myCommits.map((c: any) => c.parent_commit_id).filter((id: string | null) => !!id)))
+          if (parentIds.length === 0) return myCommits
+          // 親コミットを一括取得
+          const parentRes = await fetch(`http://localhost:3001/api/commits?ids=${parentIds.join(',')}`)
+          let parentCommits: any[] = []
+          if (parentRes.ok) {
+            parentCommits = await parentRes.json()
+          }
+          // 重複を除いてマージ
+          const allCommits = [...myCommits]
+          for (const p of parentCommits) {
+            if (!allCommits.some((c: any) => c.id === p.id)) {
+              allCommits.push(p)
+            }
+          }
+          return allCommits
         })
     }
   },
