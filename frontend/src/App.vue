@@ -48,6 +48,8 @@ const noCommit = ref(false)
 const latestSharedCommit = ref<any>(null)
 const showFetchCompare = ref(false)
 const fetchedDraftNodes = ref<any[]>([])
+const loadingMerge = ref(false)
+const sharedCommitIds = ref<string[]>([])
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -127,7 +129,8 @@ async function fetchLatestTree() {
     if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
     const treeData = await treeRes.json()
     treeNodes.value = treeData.nodes
-    store.commit('setDraftNodes', flatten(treeData.nodes))
+    store.commit('setDraftNodes', treeData.nodes)
+    await fetchCommitList()
   } catch (e: any) {
     error.value = e.message || '不明なエラー'
   } finally {
@@ -149,11 +152,16 @@ watch(commitId, (v) => { appliedCommitId.value = v })
 
 // parent_commit_idを辿って現在のappliedCommitIdから到達可能な履歴のみをリストアップ
 const filteredCommitList = computed(() => {
+  const myUserName = user.value // ログインユーザー名
   const map = new Map(commitList.value.map(c => [c.id, c]))
   const result = []
   let cur = map.get(appliedCommitId.value)
+  // 1つ目（現在のコミット）はスキップし、親から履歴をたどる
+  if (cur) cur = cur.parent_commit_id ? map.get(cur.parent_commit_id) : undefined
   while (cur) {
-    result.push(cur)
+    if (cur.author === myUserName) {
+      result.push(cur)
+    }
     cur = cur.parent_commit_id ? map.get(cur.parent_commit_id) : undefined
   }
   return result
@@ -164,7 +172,7 @@ async function applyCommitToDraftById(commitId: string) {
   if (!commit) return
   const treeRes = await fetch(`http://localhost:3001/api/trees/${commit.tree_id}`)
   const treeData = await treeRes.json()
-  store.commit('setDraftNodes', flatten(treeData.nodes))
+  store.commit('setDraftNodes', treeData.nodes)
   showToast('選択したコミット内容をドラフトに適用しました', 'success')
   appliedCommitId.value = commitId
   showHistoryModal.value = false
@@ -188,15 +196,16 @@ onMounted(() => {
   fetchLatestTree()
   fetchCommitList()
   checkIsShared()
+  fetchSharedCommitIds()
 })
 
 function flatten(nodes: any[], parentId: string | null = null): any[] {
   const res: any[] = []
   const visited = new Set()
   function dfs(n: any, parentId: string | null) {
-    if (visited.has(n.id)) return
-    visited.add(n.id)
-    res.push({ ...n, parentId: parentId == null ? null : String(parentId) })
+    if (visited.has(String(n.id))) return
+    visited.add(String(n.id))
+    res.push({ ...n, id: String(n.id), parentId: parentId == null ? null : String(parentId) })
     if (n.children) (n.children as any[]).forEach((child: any) => dfs(child, n.id))
   }
   nodes.forEach((n: any) => dfs(n, parentId))
@@ -505,52 +514,159 @@ async function onMergeClick() {
     showToast('マージ対象がありません', 'error')
     return
   }
-  // 1. fetchした内容をローカルドラフトに上書き
-  store.commit('setDraftNodes', [...fetchedDraftNodes.value])
+  loadingMerge.value = true
+  try {
+    // 1. fetchした内容をローカルドラフトに上書き
+    store.commit('setDraftNodes', [...fetchedDraftNodes.value])
 
-  // 2. 差分判定（flatten不要！）
-  const base = fetchedDraftNodes.value.map(nodeForCompare)
-  const draft = store.state.draftNodes.map(nodeForCompare)
-  // デバッグ: 差分の詳細出力
-  for (let i = 0; i < base.length; i++) {
-    const b = base[i]
-    const d = draft.find((n: any) => n.id === b.id)
-    if (!d) {
-      console.log('draftに存在しない', b)
-      continue
+    // 2. 差分判定（flatten不要！）
+    const base = fetchedDraftNodes.value.map(nodeForCompare)
+    const draft = store.state.draftNodes.map(nodeForCompare)
+    // デバッグ: 差分の詳細出力
+    for (let i = 0; i < base.length; i++) {
+      const b = base[i]
+      const d = draft.find((n: any) => n.id === b.id)
+      if (!d) {
+        console.log('draftに存在しない', b)
+        continue
+      }
+      if (b.name !== d.name) console.log('name違い', b, d)
+      if (b.parentId !== d.parentId) console.log('parentId違い', b, d)
+      if (b.depth !== d.depth) console.log('depth違い', b, d)
     }
-    if (b.name !== d.name) console.log('name違い', b, d)
-    if (b.parentId !== d.parentId) console.log('parentId違い', b, d)
-    if (b.depth !== d.depth) console.log('depth違い', b, d)
-  }
-  const diff = calcDiff(base, draft)
-  console.log('updated diff', diff.updated)
-  const isNoDiff = diff.added.length === 0 && diff.updated.length === 0 && diff.deleted.length === 0
+    const diff = calcDiff(base, draft)
+    console.log('updated diff', diff.updated)
+    const isNoDiff = diff.added.length === 0 && diff.updated.length === 0 && diff.deleted.length === 0
 
-  // 3. ツリー表示用にも反映
-  treeNodes.value = [...fetchedDraftNodes.value]
+    // 3. ツリー表示用にも反映
+    treeNodes.value = [...fetchedDraftNodes.value]
 
-  if (isNoDiff) {
-    if (latestSharedCommit.value && latestSharedCommit.value.commit_id) {
-      appliedCommitId.value = latestSharedCommit.value.commit_id
-      noCommit.value = false
-      showToast('差分がないため、共有コミットIDを引き継ぎました', 'success')
-    } else {
-      showToast('共有コミットIDが取得できません', 'error')
+    if (isNoDiff) {
+      if (latestSharedCommit.value && latestSharedCommit.value.commit_id) {
+        try {
+          // 親コミットのcreated_atを取得
+          const commitRes = await fetch(`http://localhost:3001/api/commits?id=${latestSharedCommit.value.commit_id}`)
+          const commits = await commitRes.json()
+          const parentCommit = Array.isArray(commits) ? commits[0] : commits
+          const parentCreatedAt = parentCommit?.created_at
+
+          const autoMessage = latestSharedCommit.value.message || 'fetch取り込み自動コミット'
+          const res = await store.dispatch('commitDraft', {
+            treeId: latestSharedCommit.value.tree_id,
+            author: user.value || 'auto',
+            message: autoMessage,
+            parent_commit_id: latestSharedCommit.value.commit_id,
+            created_at: latestSharedCommit.value.shared_at // org_commit_shareのshared_atをコピー
+          })
+          store.commit('clearDraft')
+          // 親コミットのタグを新コミットにも付与
+          if (latestSharedCommit.value && latestSharedCommit.value.tag_name) {
+            try {
+              const token = localStorage.getItem('token') || ''
+              await fetch('http://localhost:3001/api/tags', {
+                method: 'POST',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer ' + token
+                },
+                body: JSON.stringify({ commit_id: res.commit_id, name: latestSharedCommit.value.tag_name })
+              })
+            } catch (e) {
+              // タグ付与失敗時は無視
+            }
+          }
+          showToast('差分がないため、自動コミットを作成しました', 'success')
+          await fetchLatestTree()
+          await fetchCommitList()
+          appliedCommitId.value = res.commit_id
+          noCommit.value = false
+        } catch (e) {
+          showToast('自動コミット作成に失敗しました', 'error')
+        }
+      } else {
+        showToast('共有コミットIDが取得できません', 'error')
+      }
+      showFetchCompare.value = false
+      fetchedDraftNodes.value = []
+      return
     }
-  } else {
     appliedCommitId.value = ''
     showToast('fetchした内容をドラフトに反映しました', 'success')
+    showFetchCompare.value = false
+    fetchedDraftNodes.value = []
+    console.log('appliedCommitId', appliedCommitId.value)
+  } finally {
+    loadingMerge.value = false
   }
-  showFetchCompare.value = false
-  fetchedDraftNodes.value = []
-  console.log('appliedCommitId', appliedCommitId.value)
 }
 
 function onCancelFetchCompare() {
   fetchedDraftNodes.value = []
   showFetchCompare.value = false
 }
+
+async function fetchSharedCommitIds() {
+  try {
+    const res = await fetch('http://localhost:3001/api/commit_share')
+    if (res.ok) {
+      const shares = await res.json()
+      sharedCommitIds.value = shares.map((s: any) => s.commit_id)
+    } else {
+      sharedCommitIds.value = []
+    }
+  } catch {
+    sharedCommitIds.value = []
+  }
+}
+
+const displayTagName = computed(() => {
+  // 現在のappliedCommitIdのコミットを取得
+  const currentCommit = commitList.value.find(c => c.id === (appliedCommitId.value || commitId.value))
+  if (!currentCommit) return tagName.value
+  // 親コミットが共有コミットなら、そのタグ名を表示
+  if (currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
+    // 親コミットのタグ名を取得
+    return parentTagName.value
+  }
+  // それ以外は自身のタグ名
+  return tagName.value
+})
+
+const parentTagName = ref<string | undefined>(undefined)
+watch([
+  () => appliedCommitId.value,
+  () => commitList.value.length,
+  () => sharedCommitIds.value.length
+], async ([cid]) => {
+  const currentCommit = commitList.value.find(c => c.id === (cid || commitId.value))
+  if (currentCommit && currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
+    // 親コミットのタグ名を取得
+    try {
+      const res = await fetch(`http://localhost:3001/api/tags/${currentCommit.parent_commit_id}`)
+      if (res.ok) {
+        const tag = await res.json()
+        parentTagName.value = tag?.name || undefined
+      } else {
+        parentTagName.value = undefined
+      }
+    } catch {
+      parentTagName.value = undefined
+    }
+  } else {
+    parentTagName.value = undefined
+  }
+}, { immediate: true })
+
+// タグ編集可否のcomputedを追加
+const canEditTag = computed(() => {
+  // 現在のappliedCommitIdのコミットを取得
+  const currentCommit = commitList.value.find(c => c.id === (appliedCommitId.value || commitId.value))
+  // 親コミットが共有コミットなら編集不可
+  if (currentCommit && currentCommit.parent_commit_id && sharedCommitIds.value.includes(currentCommit.parent_commit_id)) {
+    return false
+  }
+  return true
+})
 </script>
 
 <template>
@@ -577,7 +693,10 @@ function onCancelFetchCompare() {
         @close="toast = null"
       />
       <div v-if="showFetchCompare && fetchedDraftNodes">
-        <div style="max-width:100vw; box-sizing:border-box; padding:0 2vw; margin:0 auto; width:100%; overflow-x:auto;">
+        <div style="max-width:100vw; box-sizing:border-box; padding:0 2vw; margin:0 auto; width:100%; overflow-x:auto; position:relative;">
+          <div v-if="loadingMerge" style="position:absolute; left:0; top:0; width:100%; height:100%; background:rgba(255,255,255,0.7); z-index:20; display:flex; align-items:center; justify-content:center;">
+            <span class="spinner" style="width:3em; height:3em; border-width:6px;"></span>
+          </div>
           <div style="display: flex; gap: 2em; width:100%; align-items: center;">
             <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
               <h2 style="margin:0;">自分の最新コミット</h2>
@@ -619,8 +738,9 @@ function onCancelFetchCompare() {
         <div style="display: flex; align-items: center; margin-bottom: 0.7em;">
           <DraftStateBar
             :hasDraft="!isCommitting && hasDraft"
-            :tagName="tagName"
+            :tagName="displayTagName"
             :commitId="appliedCommitId || commitId"
+            :canEditTag="canEditTag"
             @diff="onDiff"
             @edit-tag="openTagModal"
             @clear="onClearDraft"
@@ -652,6 +772,7 @@ function onCancelFetchCompare() {
           <CommitHistoryModal
             :show="showHistoryModal"
             :commitList="filteredCommitList"
+            :sharedCommitIds="sharedCommitIds"
             @apply="applyCommitToDraftById"
             @close="showHistoryModal = false"
           />

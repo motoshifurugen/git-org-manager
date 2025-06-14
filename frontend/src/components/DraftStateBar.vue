@@ -1,5 +1,5 @@
 <script setup lang="ts">
-const props = defineProps<{ hasDraft: boolean; tagName?: string; commitId: string }>()
+const props = defineProps<{ hasDraft: boolean; tagName?: string; commitId: string; canEditTag?: boolean }>()
 const emit = defineEmits(['commit', 'diff', 'edit-tag', 'clear'])
 </script>
 
@@ -12,11 +12,18 @@ const emit = defineEmits(['commit', 'diff', 'edit-tag', 'clear'])
       <button @click="$emit('clear')" style="margin-left:0.5em; background:#e0e4ea; color:#2d3a4a;">クリア</button>
     </template>
     <template v-else>
-      <button class="tag-display-btn" @click="$emit('edit-tag')" title="タグを付与・編集">
+      <button class="tag-display-btn" @click="$emit('edit-tag')" title="タグを付与・編集" :disabled="props.canEditTag === false">
         <span class="tag-icon" style="font-size:1.2em;">
           {{ (props.tagName && props.tagName.length > 0) ? '🏷️' : '📝' }}
         </span>
-        <span class="tag-label" style="font-family:monospace; font-size:1em;">
+        <span
+          class="tag-label"
+          :style="{
+            fontFamily: 'monospace',
+            fontSize: '1em',
+            color: props.canEditTag === false ? '#bbb' : '#2d3a4a'
+          }"
+        >
           {{ (props.tagName && props.tagName.length > 0) ? props.tagName : props.commitId }}
         </span>
       </button>
