@@ -8,8 +8,10 @@ const emit = defineEmits(['commit', 'diff', 'edit-tag', 'clear'])
     <template v-if="props.hasDraft">
       <span class="dot">●</span>
       未コミットの変更があります
-      <button @click="$emit('diff')">diff</button>
-      <button @click="$emit('clear')" style="margin-left:0.5em; background:#e0e4ea; color:#2d3a4a;">クリア</button>
+      <div class="draft-btn-row">
+        <button class="clear-btn" @click="$emit('clear')">クリア</button>
+        <button class="diff-btn" @click="$emit('diff')">差分</button>
+      </div>
     </template>
     <template v-else>
       <button class="tag-display-btn" @click="$emit('edit-tag')" title="タグを付与・編集" :disabled="props.canEditTag === false">
@@ -83,6 +85,42 @@ button {
 .tag-display-btn:hover, .tag-display-btn:focus {
   background: #e6f7ff;
   outline: none;
+}
+.draft-btn-row {
+  display: flex;
+  gap: 1em;
+  margin-left: 1.5em;
+}
+.clear-btn,
+.diff-btn {
+  min-width: 90px;
+}
+.clear-btn {
+  background: #e0e4ea;
+  color: #2d3a4a;
+  border: none;
+  border-radius: 5px;
+  padding: 0.4em 1.2em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s, color 0.2s;
+}
+.clear-btn:hover {
+  background: #cfd4de;
+  color: #2d3a4a;
+}
+.diff-btn {
+  background: #347474;
+  color: #fff;
+  border: none;
+  border-radius: 5px;
+  padding: 0.4em 1.2em;
+  font-weight: bold;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+.diff-btn:hover {
+  background: #255a5a;
 }
 </style>
 

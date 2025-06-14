@@ -42,7 +42,7 @@ const hasSameDate = computed(() => {
       <div v-if="props.loading" style="text-align:center;">読み込み中...</div>
       <template v-else>
         <div v-if="hasNewerShared">
-          <div style="margin-bottom:1.2em; color:#c41d7f; font-weight:bold;">
+          <div style="margin-bottom:1.2em; color:#347474; font-weight:bold;">
             <template v-if="hasSameDate">
               最新に同期済みです。
             </template>
@@ -51,16 +51,18 @@ const hasSameDate = computed(() => {
               最新の共有コミットをfetchして適用できます。
             </template>
           </div>
-          <button v-if="!hasSameDate" @click="props.onFetch" style="background:#347474;color:#fff;">fetch（取得）</button>
         </div>
         <div v-else>
           <div style="margin-bottom:1.2em; color:#347474; font-weight:bold;">
             このコミットを共有（push）できます。
           </div>
-          <button @click="props.onPush" style="background:#347474;color:#fff;">push（共有）</button>
         </div>
       </template>
-      <button @click="props.onClose" style="margin-top:1.5em;background:#e0e4ea;color:#2d3a4a;">閉じる</button>
+      <div style="display: flex; gap: 1em; justify-content: center; margin-top: 1.5em;">
+        <button @click="props.onClose" style="background:#e0e4ea;color:#2d3a4a;">閉じる</button>
+        <button v-if="!hasSameDate && hasNewerShared" @click="props.onFetch" style="background:#347474;color:#fff;">fetch（取得）</button>
+        <button v-else-if="!hasNewerShared" @click="props.onPush" style="background:#347474;color:#fff;">push（共有）</button>
+      </div>
     </div>
   </div>
 </template>
