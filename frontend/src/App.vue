@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed, watch } from 'vue'
+import { ref, onMounted, computed, watch, nextTick } from 'vue'
 import { useStore } from 'vuex'
 import OrganizationTree from './components/OrganizationTree.vue'
 import DraftStateBar from './components/DraftStateBar.vue'
@@ -32,6 +32,11 @@ const showShareModal = ref(false)
 const sharedCommits = ref<any[]>([])
 const shareLoading = ref(false)
 const showSyncTooltip = ref(false)
+const syncTooltipText = computed(() => {
+  if (hasDraft.value) return '未コミットの変更があります'
+  if (isShared.value) return '最新に同期されています'
+  return ''
+})
 const user = ref<string>(localStorage.getItem('user') || '')
 const userId = ref<string>(localStorage.getItem('userId') || '')
 const token = ref<string>(localStorage.getItem('token') || '')
@@ -108,6 +113,7 @@ async function fetchLatestTree() {
       } else {
         latestSharedCommit.value = null
       }
+      console.log('noCommit', noCommit.value)
       return
     }
     const commit = commits[0] // 最新（created_at DESC）
@@ -169,6 +175,7 @@ async function checkIsShared() {
   } catch {
     isShared.value = false
   }
+  console.log('isShared', isShared.value)
 }
 
 watch(commitId, () => { checkIsShared() })
@@ -406,10 +413,11 @@ async function fetchAndApplyLatestSharedCommit() {
     const treeData = await treeRes.json()
     // まず自分の最新コミット内容をtreeNodes.valueに再セット
     await fetchLatestTree()
+    await nextTick()
     // その後、ドラフトを共有コミット内容に
     store.commit('setDraftNodes', flatten(treeData.nodes))
+    await nextTick()
     showToast('最新の共有コミットをドラフトに適用しました', 'success')
-    noCommit.value = false
   } catch (e: any) {
     showToast('共有コミットのfetchに失敗しました', 'error')
   }
@@ -421,6 +429,10 @@ function onSyncFetchClick() {
     return
   }
   fetchAndApplyLatestSharedCommit()
+}
+
+function onSyncButtonHover() {
+  showSyncTooltip.value = !!(hasDraft.value || isShared.value)
 }
 
 const iconButtonStyle = computed<CSSProperties>(() => ({
@@ -502,7 +514,7 @@ function handleLogout() {
         :type="toast.type"
         @close="toast = null"
       />
-      <div v-if="noCommit" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
+      <div v-if="noCommit && !hasDraft" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
         <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.7em;">まだコミットがありません</div>
         <div style="margin-bottom:1em;">他のユーザーが共有した最新のコミットをfetchしてドラフトに適用できます。</div>
         <button
@@ -513,7 +525,7 @@ function handleLogout() {
         >最新の共有コミットをfetch</button>
         <div v-else style="color:#c41d7f;">共有コミットが存在しません</div>
       </div>
-      <div v-if="!noCommit" style="width:100%">
+      <div v-else style="width:100%">
         <h1>組織構造ツリー</h1>
         <div style="display: flex; align-items: center; margin-bottom: 0.7em;">
           <DraftStateBar
@@ -536,14 +548,14 @@ function handleLogout() {
             <button
               @click="openShareModal"
               title="このコミットを共有"
-              :disabled="isShared"
-              :style="{...iconButtonStyle, position: 'relative', opacity: isShared ? 0.4 : 1}"
-              @mouseenter="showSyncTooltip = isShared"
+              :disabled="isShared || noCommit"
+              :style="{...iconButtonStyle, position: 'relative', opacity: (isShared || noCommit) ? 0.4 : 1}"
+              @mouseenter="onSyncButtonHover"
               @mouseleave="showSyncTooltip = false"
             >
               <span style="font-size:1.2em; margin:0; padding:0 12px;">🌐</span>
               <span class="icon-label">同期</span>
-              <div v-if="showSyncTooltip" class="sync-tooltip">最新に同期されています</div>
+              <div v-if="showSyncTooltip" class="sync-tooltip">{{ syncTooltipText }}</div>
             </button>
           </div>
         </div>
