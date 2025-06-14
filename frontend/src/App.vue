@@ -10,7 +10,7 @@ import type { CSSProperties } from 'vue'
 
 const store = useStore()
 const treeId = ref('')
-const treeNodes = ref([])
+const treeNodes = ref<any[]>([])
 const loading = ref(true)
 const error = ref('')
 const showDiff = ref(false)
@@ -192,18 +192,30 @@ onMounted(() => {
 
 function flatten(nodes: any[], parentId: string | null = null): any[] {
   const res: any[] = []
+  const visited = new Set()
   function dfs(n: any, parentId: string | null) {
-    res.push({ ...n, parentId })
+    if (visited.has(n.id)) return
+    visited.add(n.id)
+    res.push({ ...n, parentId: parentId == null ? null : String(parentId) })
     if (n.children) (n.children as any[]).forEach((child: any) => dfs(child, n.id))
   }
   nodes.forEach((n: any) => dfs(n, parentId))
   return res
 }
 
+function nodeForCompare(n: any) {
+  return {
+    id: String(n.id),
+    name: String(n.name),
+    parentId: n.parentId == null ? null : String(n.parentId),
+    depth: n.depth == null ? null : Number(n.depth),
+  }
+}
+
 function calcDiff(baseNodes: any[], draftNodes: any[]): { added: any[]; updated: any[]; deleted: any[] } {
-  // baseNodes: ネスト構造 → フラット化
-  const baseFlat = flatten(baseNodes)
-  const draftFlat = draftNodes // こちらは既にフラット
+  // flatten不要
+  const baseFlat = baseNodes.map(nodeForCompare)
+  const draftFlat = draftNodes.map(nodeForCompare)
   const baseMap = baseFlat.reduce((acc: Record<string, any>, n: any) => { acc[n.id] = n; return acc }, {} as Record<string, any>)
   const draftMap = draftFlat.reduce((acc: Record<string, any>, n: any) => { acc[n.id] = n; return acc }, {} as Record<string, any>)
   const added = draftFlat.filter((n: any) => !baseMap[n.id])
@@ -288,7 +300,7 @@ async function fetchTagName(commitId: string) {
 }
 
 watch(
-  [() => hasDraft.value, () => commitId.value],
+  [() => hasDraft.value, () => appliedCommitId.value],
   ([draft, cid]) => {
     if (!draft && cid) {
       fetchTagName(cid)
@@ -488,8 +500,51 @@ function handleLogout() {
   localStorage.removeItem('token')
 }
 
-function onMergeClick() {
-  // Implementation of onMergeClick
+async function onMergeClick() {
+  if (!fetchedDraftNodes.value.length) {
+    showToast('マージ対象がありません', 'error')
+    return
+  }
+  // 1. fetchした内容をローカルドラフトに上書き
+  store.commit('setDraftNodes', [...fetchedDraftNodes.value])
+
+  // 2. 差分判定（flatten不要！）
+  const base = fetchedDraftNodes.value.map(nodeForCompare)
+  const draft = store.state.draftNodes.map(nodeForCompare)
+  // デバッグ: 差分の詳細出力
+  for (let i = 0; i < base.length; i++) {
+    const b = base[i]
+    const d = draft.find((n: any) => n.id === b.id)
+    if (!d) {
+      console.log('draftに存在しない', b)
+      continue
+    }
+    if (b.name !== d.name) console.log('name違い', b, d)
+    if (b.parentId !== d.parentId) console.log('parentId違い', b, d)
+    if (b.depth !== d.depth) console.log('depth違い', b, d)
+  }
+  const diff = calcDiff(base, draft)
+  console.log('updated diff', diff.updated)
+  const isNoDiff = diff.added.length === 0 && diff.updated.length === 0 && diff.deleted.length === 0
+
+  // 3. ツリー表示用にも反映
+  treeNodes.value = [...fetchedDraftNodes.value]
+
+  if (isNoDiff) {
+    if (latestSharedCommit.value && latestSharedCommit.value.commit_id) {
+      appliedCommitId.value = latestSharedCommit.value.commit_id
+      noCommit.value = false
+      showToast('差分がないため、共有コミットIDを引き継ぎました', 'success')
+    } else {
+      showToast('共有コミットIDが取得できません', 'error')
+    }
+  } else {
+    appliedCommitId.value = ''
+    showToast('fetchした内容をドラフトに反映しました', 'success')
+  }
+  showFetchCompare.value = false
+  fetchedDraftNodes.value = []
+  console.log('appliedCommitId', appliedCommitId.value)
 }
 
 function onCancelFetchCompare() {
@@ -549,7 +604,7 @@ function onCancelFetchCompare() {
           </div>
         </div>
       </div>
-      <div v-else-if="noCommit && !hasDraft" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
+      <div v-else-if="noCommit && !hasDraft && !appliedCommitId" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
         <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.7em;">まだコミットがありません</div>
         <button
           v-if="latestSharedCommit"
@@ -565,7 +620,7 @@ function onCancelFetchCompare() {
           <DraftStateBar
             :hasDraft="!isCommitting && hasDraft"
             :tagName="tagName"
-            :commitId="commitId"
+            :commitId="appliedCommitId || commitId"
             @diff="onDiff"
             @edit-tag="openTagModal"
             @clear="onClearDraft"
