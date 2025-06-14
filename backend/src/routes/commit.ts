@@ -12,7 +12,7 @@ router.get('/commits/latest', async (_, res) => {
 
 // スナップショット（コミット）作成API
 router.post('/commit', async (req, res) => {
-  const { author, message, nodes } = req.body;
+  const { author, message, nodes, parent_commit_id } = req.body;
   if (!author || !nodes) {
     return res.status(400).json({ error: 'author, nodesは必須です' });
   }
@@ -64,8 +64,8 @@ router.post('/commit', async (req, res) => {
     }
     // 4. org_commit の作成
     const commitResult = await client.query(
-      'INSERT INTO org_commit (tree_id, message, author) VALUES ($1, $2, $3) RETURNING id, created_at',
-      [tree_id, message || null, author]
+      'INSERT INTO org_commit (tree_id, message, author, parent_commit_id) VALUES ($1, $2, $3, $4) RETURNING id, created_at',
+      [tree_id, message || null, author, parent_commit_id || null]
     );
     await client.query('COMMIT');
     res.json({ success: true, commit_id: commitResult.rows[0].id, tree_id, created_at: commitResult.rows[0].created_at });
@@ -74,6 +74,78 @@ router.post('/commit', async (req, res) => {
     res.status(500).json({ error: 'commit作成に失敗しました', detail: e.message });
   } finally {
     client.release();
+  }
+});
+
+// コミット一覧取得API
+router.get('/commits', async (_, res) => {
+  try {
+    const result = await pool.query(
+      `SELECT c.id, c.message, c.author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
+       FROM org_commit c
+       LEFT JOIN org_tag t ON c.id = t.commit_id
+       ORDER BY c.created_at DESC`
+    );
+    res.json(result.rows);
+  } catch (e: any) {
+    res.status(500).json({ error: 'コミット一覧取得に失敗しました', detail: e.message });
+  }
+});
+
+// 共有コミットを作成（push）
+router.post('/commit_share', async (req, res) => {
+  const { commit_id, note } = req.body;
+  if (!commit_id) return res.status(400).json({ error: 'commit_idは必須です' });
+  try {
+    // 既に共有済みかチェック
+    const exist = await pool.query('SELECT id FROM org_commit_share WHERE commit_id = $1', [commit_id]);
+    if (exist.rows.length > 0) {
+      return res.status(409).json({ error: 'このコミットは既に共有されています' });
+    }
+    const result = await pool.query(
+      'INSERT INTO org_commit_share (commit_id, note) VALUES ($1, $2) RETURNING *',
+      [commit_id, note || null]
+    );
+    res.json(result.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: '共有に失敗しました', detail: (e as any).message });
+  }
+});
+
+// 共有コミット一覧を取得（fetch）
+router.get('/commit_share', async (_, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT s.id as share_id, s.commit_id, s.shared_at, s.note,
+             c.message, c.author, c.created_at, t.name as tag_name
+      FROM org_commit_share s
+      JOIN org_commit c ON s.commit_id = c.id
+      LEFT JOIN org_tag t ON c.id = t.commit_id
+      ORDER BY s.shared_at DESC
+    `);
+    res.json(result.rows);
+  } catch (e) {
+    res.status(500).json({ error: '共有コミット一覧取得に失敗しました', detail: (e as any).message });
+  }
+});
+
+// 共有コミットをドラフトにマージ（merge）
+router.post('/merge_commit_share', async (req, res) => {
+  const { share_id } = req.body;
+  if (!share_id) return res.status(400).json({ error: 'share_idは必須です' });
+  try {
+    const result = await pool.query(`
+      SELECT c.tree_id FROM org_commit_share s
+      JOIN org_commit c ON s.commit_id = c.id
+      WHERE s.id = $1
+    `, [share_id]);
+    if (result.rows.length === 0) return res.status(404).json({ error: '共有コミットが見つかりません' });
+    const tree_id = result.rows[0].tree_id;
+    // ツリー内容を返す
+    const treeRes = await pool.query('SELECT * FROM org_tree WHERE id = $1', [tree_id]);
+    res.json(treeRes.rows[0]);
+  } catch (e) {
+    res.status(500).json({ error: 'マージに失敗しました', detail: (e as any).message });
   }
 });
 

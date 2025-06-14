@@ -29,6 +29,7 @@ create table if not exists org_commit (
   message text,
   author text not null,
   created_at timestamp default current_timestamp
+  parent_commit_id uuid references org_commit(id)
 );
 
 -- タグ（任意の名前ラベル）

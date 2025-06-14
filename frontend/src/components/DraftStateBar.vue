@@ -1,6 +1,6 @@
 <script setup lang="ts">
 const props = defineProps<{ hasDraft: boolean; tagName?: string; commitId: string }>()
-const emit = defineEmits(['commit', 'diff', 'edit-tag'])
+const emit = defineEmits(['commit', 'diff', 'edit-tag', 'clear'])
 </script>
 
 <template>
@@ -9,6 +9,7 @@ const emit = defineEmits(['commit', 'diff', 'edit-tag'])
       <span class="dot">●</span>
       未コミットの変更があります
       <button @click="$emit('diff')">diff</button>
+      <button @click="$emit('clear')" style="margin-left:0.5em; background:#e0e4ea; color:#2d3a4a;">クリア</button>
     </template>
     <template v-else>
       <button class="tag-display-btn" @click="$emit('edit-tag')" title="タグを付与・編集">
