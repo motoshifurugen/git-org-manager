@@ -71,6 +71,14 @@ const hasDraft = computed(() => {
   return diff.added.length > 0 || diff.updated.length > 0 || diff.deleted.length > 0
 })
 
+// 未fetch共有コミットがあるか判定
+const hasUnfetchedSharedCommit = computed(() => {
+  if (!sharedCommits.value.length || !commitList.value.length) return false
+  // 共有コミットのうち、自分のコミットのparent_commit_idに含まれていないもの
+  const myParentIds = new Set(commitList.value.map(c => c.parent_commit_id).filter(Boolean))
+  return sharedCommits.value.some((s: any) => !myParentIds.has(s.commit_id))
+})
+
 function unflatten(nodes: any[]): any[] {
   const nodeMap: Record<string, any> = {}
   nodes.forEach(n => {
@@ -818,6 +826,7 @@ function onCommitFromDiff() {
             :loading="shareLoading"
             :onPush="handlePushShare"
             :onFetch="handleFetchShare"
+            :hasUnfetchedSharedCommit="hasUnfetchedSharedCommit"
           />
         </div>
       </template>

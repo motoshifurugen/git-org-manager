@@ -8,7 +8,8 @@ const props = defineProps<{
   sharedCommits: { commit_id: string, shared_at: string, created_at: string, author: string, message: string, tag_name?: string|null }[],
   loading: boolean,
   onPush: () => void,
-  onFetch: () => void
+  onFetch: () => void,
+  hasUnfetchedSharedCommit?: boolean
 }>()
 const emit = defineEmits(['close', 'push', 'fetch'])
 
@@ -41,26 +42,35 @@ const hasSameDate = computed(() => {
       <h2 style="margin-bottom:1em;">コミット共有</h2>
       <div v-if="props.loading" style="text-align:center;">読み込み中...</div>
       <template v-else>
-        <div v-if="hasNewerShared">
+        <div v-if="props.hasUnfetchedSharedCommit">
           <div style="margin-bottom:1.2em; color:#347474; font-weight:bold;">
-            <template v-if="hasSameDate">
-              最新に同期済みです。
-            </template>
-            <template v-else>
-              現在のコミットより新しい共有コミットが存在します。<br>
-              最新の共有コミットをfetchして適用できます。
-            </template>
+            fetchしていない共有コミットが存在します。<br>
+            最新の共有コミットをfetchして適用できます。
           </div>
         </div>
         <div v-else>
-          <div style="margin-bottom:1.2em; color:#347474; font-weight:bold;">
-            このコミットを共有（push）できます。
+          <div v-if="hasNewerShared">
+            <div style="margin-bottom:1.2em; color:#347474; font-weight:bold;">
+              <template v-if="hasSameDate">
+                最新に同期済みです。
+              </template>
+              <template v-else>
+                現在のコミットより新しい共有コミットが存在します。<br>
+                最新の共有コミットをfetchして適用できます。
+              </template>
+            </div>
+          </div>
+          <div v-else>
+            <div style="margin-bottom:1.2em; color:#347474; font-weight:bold;">
+              このコミットを共有（push）できます。
+            </div>
           </div>
         </div>
       </template>
       <div style="display: flex; gap: 1em; justify-content: center; margin-top: 1.5em;">
         <button @click="props.onClose" style="background:#e0e4ea;color:#2d3a4a;">閉じる</button>
-        <button v-if="!hasSameDate && hasNewerShared" @click="props.onFetch" style="background:#347474;color:#fff;">fetch（取得）</button>
+        <button v-if="props.hasUnfetchedSharedCommit" @click="props.onFetch" style="background:#347474;color:#fff;">fetch（取得）</button>
+        <button v-else-if="!hasSameDate && hasNewerShared" @click="props.onFetch" style="background:#347474;color:#fff;">fetch（取得）</button>
         <button v-else-if="!hasNewerShared" @click="props.onPush" style="background:#347474;color:#fff;">push（共有）</button>
       </div>
     </div>
