@@ -163,20 +163,24 @@ export default {
 .tree-table-wrapper {
   overflow-x: auto;
   margin-top: 1em;
+  width: auto;
+  min-width: 560px;
+  max-width: none;
+  float: none;
+  box-sizing: border-box;
 }
 .half-width {
-  width: 50vw;
-  min-width: 400px;
-  max-width: 50vw;
-  float: left;
-  box-sizing: border-box;
+  width: auto;
+  min-width: 560px;
+  max-width: none;
+  float: none;
   margin-left: 0;
 }
 .tree-table {
   border-collapse: collapse;
   border-spacing: 0;
   width: 100%;
-  min-width: 600px;
+  min-width: 560px;
   background: #fff;
   /* box-shadow: 0 2px 8px rgba(60,60,60,0.07); */
 }

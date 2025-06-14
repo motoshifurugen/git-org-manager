@@ -12,14 +12,12 @@ export interface State {
   count: number
   draftNodes: OrgNode[]
   selectedNodeId: string | null
-  hasDraft: boolean
 }
 
 const state: State = {
   count: 0,
   draftNodes: [],
   selectedNodeId: null,
-  hasDraft: false
 }
 
 export default createStore({
@@ -36,7 +34,6 @@ export default createStore({
     },
     clearDraft(state: State) {
       state.draftNodes = []
-      state.hasDraft = false
     }
   },
   actions: {

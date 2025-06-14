@@ -46,6 +46,8 @@ const loginError = ref('')
 const isLoggingIn = ref(false)
 const noCommit = ref(false)
 const latestSharedCommit = ref<any>(null)
+const showFetchCompare = ref(false)
+const fetchedDraftNodes = ref<any[]>([])
 
 const hasDraft = computed(() => {
   const diff = calcDiff(treeNodes.value, store.state.draftNodes)
@@ -113,6 +115,8 @@ async function fetchLatestTree() {
       } else {
         latestSharedCommit.value = null
       }
+      // ローカルドラフトも空にする（初回fetch時の左側を空表に）
+      store.commit('setDraftNodes', [])
       console.log('noCommit', noCommit.value)
       return
     }
@@ -401,23 +405,17 @@ function handleFetchShare() {
   showToast('fetch機能は未実装です', 'error')
 }
 
-async function fetchAndApplyLatestSharedCommit() {
+async function fetchLatestSharedCommit() {
   if (!latestSharedCommit.value || !latestSharedCommit.value.tree_id) {
     showToast('共有コミットのtree_idが取得できません', 'error')
     return
   }
   try {
-    // 共有コミットのtree_idからツリーを取得
     const treeRes = await fetch(`http://localhost:3001/api/trees/${latestSharedCommit.value.tree_id}`)
     if (!treeRes.ok) throw new Error('ツリー構造取得失敗')
     const treeData = await treeRes.json()
-    // まず自分の最新コミット内容をtreeNodes.valueに再セット
-    await fetchLatestTree()
-    await nextTick()
-    // その後、ドラフトを共有コミット内容に
-    store.commit('setDraftNodes', flatten(treeData.nodes))
-    await nextTick()
-    showToast('最新の共有コミットをドラフトに適用しました', 'success')
+    fetchedDraftNodes.value = flatten(treeData.nodes)
+    showFetchCompare.value = true
   } catch (e: any) {
     showToast('共有コミットのfetchに失敗しました', 'error')
   }
@@ -428,7 +426,7 @@ function onSyncFetchClick() {
     showToast('未コミットの変更があります', 'error')
     return
   }
-  fetchAndApplyLatestSharedCommit()
+  fetchLatestSharedCommit()
 }
 
 function onSyncButtonHover() {
@@ -489,6 +487,15 @@ function handleLogout() {
   localStorage.removeItem('userId')
   localStorage.removeItem('token')
 }
+
+function onMergeClick() {
+  // Implementation of onMergeClick
+}
+
+function onCancelFetchCompare() {
+  fetchedDraftNodes.value = []
+  showFetchCompare.value = false
+}
 </script>
 
 <template>
@@ -514,9 +521,36 @@ function handleLogout() {
         :type="toast.type"
         @close="toast = null"
       />
-      <div v-if="noCommit && !hasDraft" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
+      <div v-if="showFetchCompare && fetchedDraftNodes">
+        <div style="max-width:100vw; box-sizing:border-box; padding:0 2vw; margin:0 auto; width:100%; overflow-x:auto;">
+          <div style="display: flex; gap: 2em; width:100%; align-items: center;">
+            <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <h2 style="margin:0;">自分の最新コミット</h2>
+            </div>
+            <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:60px;">
+              <div style="display:flex; gap:0.7em; align-items:center;">
+                <button @click="onMergeClick" style="display:flex; align-items:center; justify-content:center; background: #347474; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
+                  <span style="font-size:1em; margin-right:0.5em;">←</span>merge
+                </button>
+                <button @click="onCancelFetchCompare" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
+              </div>
+            </div>
+            <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
+              <h2 style="margin:0;">fetchした共有コミット</h2>
+            </div>
+          </div>
+          <div style="display: flex; gap: 2em; width:100%;">
+            <div style="flex: 1; min-width:0;">
+              <OrganizationTree :nodes="unflatten(store.state.draftNodes)" :maxDepth="5" />
+            </div>
+            <div style="flex: 1; min-width:0;">
+              <OrganizationTree :nodes="unflatten(fetchedDraftNodes)" :maxDepth="5" />
+            </div>
+          </div>
+        </div>
+      </div>
+      <div v-else-if="noCommit && !hasDraft" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
         <div style="font-weight:bold; font-size:1.1em; margin-bottom:0.7em;">まだコミットがありません</div>
-        <div style="margin-bottom:1em;">他のユーザーが共有した最新のコミットをfetchしてドラフトに適用できます。</div>
         <button
           v-if="latestSharedCommit"
           @click="onSyncFetchClick"
