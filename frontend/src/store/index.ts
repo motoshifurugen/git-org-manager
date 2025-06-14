@@ -63,10 +63,14 @@ export default createStore({
     },
     commitDraft({ commit, state }: any, { treeId, author, message, parent_commit_id }: { treeId: string, author: string, message?: string, parent_commit_id?: string }) {
       // API保存処理
+      const token = localStorage.getItem('token') || ''
       return fetch('http://localhost:3001/api/commit', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ tree_id: treeId, author, message, nodes: state.draftNodes, parent_commit_id })
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer ' + token
+        },
+        body: JSON.stringify({ tree_id: treeId, message, nodes: state.draftNodes, parent_commit_id })
       })
         .then(res => {
           if (!res.ok) throw new Error('コミットAPI失敗')
@@ -75,6 +79,14 @@ export default createStore({
         .then(data => {
           commit('clearDraft')
           return data
+        })
+    },
+    fetchMyCommits({ commit }: any) {
+      const userId = localStorage.getItem('userId') || ''
+      return fetch(`http://localhost:3001/api/commits?author=${encodeURIComponent(userId)}`)
+        .then(res => {
+          if (!res.ok) throw new Error('コミット一覧取得失敗')
+          return res.json()
         })
     }
   },

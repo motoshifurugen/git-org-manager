@@ -1,8 +1,23 @@
-import { Router } from 'express'
+import { Router, Request, Response, NextFunction } from 'express'
 import pool from '../db'
 import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 
 const router = Router()
+const JWT_SECRET = process.env.JWT_SECRET || 'your_secret_key'
+
+// JWT認証ミドルウェア
+function authMiddleware(req: Request, res: Response, next: NextFunction) {
+  const auth = req.headers.authorization
+  if (!auth || !auth.startsWith('Bearer ')) return res.status(401).json({ error: '認証が必要です' })
+  try {
+    const payload = jwt.verify(auth.slice(7), JWT_SECRET)
+    ;(req as any).userId = (payload as any).userId
+    next()
+  } catch {
+    res.status(401).json({ error: '認証エラー' })
+  }
+}
 
 // 最新コミット取得
 router.get('/commits/latest', async (_, res) => {
@@ -11,8 +26,9 @@ router.get('/commits/latest', async (_, res) => {
 })
 
 // スナップショット（コミット）作成API
-router.post('/commit', async (req, res) => {
-  const { author, message, nodes, parent_commit_id } = req.body;
+router.post('/commit', authMiddleware, async (req, res) => {
+  const { message, nodes, parent_commit_id } = req.body;
+  const author = (req as any).userId;
   if (!author || !nodes) {
     return res.status(400).json({ error: 'author, nodesは必須です' });
   }
@@ -77,15 +93,28 @@ router.post('/commit', async (req, res) => {
   }
 });
 
-// コミット一覧取得API
-router.get('/commits', async (_, res) => {
+// コミット一覧取得API（authorで絞り込み対応）
+router.get('/commits', async (req, res) => {
+  const { author } = req.query;
   try {
-    const result = await pool.query(
-      `SELECT c.id, c.message, c.author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
-       FROM org_commit c
-       LEFT JOIN org_tag t ON c.id = t.commit_id
-       ORDER BY c.created_at DESC`
-    );
+    let result;
+    if (author) {
+      result = await pool.query(
+        `SELECT c.id, c.message, c.author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
+         FROM org_commit c
+         LEFT JOIN org_tag t ON c.id = t.commit_id
+         WHERE c.author = $1
+         ORDER BY c.created_at DESC`,
+        [author]
+      );
+    } else {
+      result = await pool.query(
+        `SELECT c.id, c.message, c.author, c.created_at, c.tree_id, c.parent_commit_id, t.name as tag_name
+         FROM org_commit c
+         LEFT JOIN org_tag t ON c.id = t.commit_id
+         ORDER BY c.created_at DESC`
+      );
+    }
     res.json(result.rows);
   } catch (e: any) {
     res.status(500).json({ error: 'コミット一覧取得に失敗しました', detail: e.message });
@@ -117,7 +146,7 @@ router.get('/commit_share', async (_, res) => {
   try {
     const result = await pool.query(`
       SELECT s.id as share_id, s.commit_id, s.shared_at, s.note,
-             c.message, c.author, c.created_at, t.name as tag_name
+             c.message, c.author, c.created_at, c.tree_id, t.name as tag_name
       FROM org_commit_share s
       JOIN org_commit c ON s.commit_id = c.id
       LEFT JOIN org_tag t ON c.id = t.commit_id
