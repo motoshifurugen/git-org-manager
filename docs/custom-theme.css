@@ -1,0 +1,321 @@
+/* @theme custom-theme */
+
+/* 全体の背景とフォント */
+section {
+  background: #f7fafc;
+  color: #222;
+  font-family: "Noto Sans JP", "Inter", Arial, sans-serif;
+  padding: 96px 80px 96px 80px;
+  letter-spacing: 0.01em;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  font-size: 1.25em;
+  line-height: 1.5;
+}
+
+/* 表示タイトル */
+section > h1 {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 2.6em;
+  font-weight: 900;
+  color: #b45309;
+  background: #fcf7ef;
+  padding: 0.5em 2.2em 0.5em 3em;
+  border-radius: 24px;
+  box-shadow:
+    8px 8px 24px #e6e1d6,
+    -8px -8px 24px #fdfcf7,
+    0 4px 18px 0 rgba(245,158,66,0.10);
+  margin-bottom: 1.2em;
+  margin-top: 2.2em;
+  letter-spacing: 0.04em;
+  text-shadow: 0 2px 8px rgba(180,83,9,0.08);
+  line-height: 1.2;
+  text-align: center;
+  margin-left: auto;
+  margin-right: auto;
+  position: relative;
+  border: none;
+}
+
+/* スライドタイトル（h2）を左上に固定（左余白を調整） */
+section h2 {
+  position: absolute;
+  top: 48px;
+  left: 80px;
+  margin: 0;
+  font-size: 1.5em;
+  color: #b45309;
+  font-weight: 800;
+  letter-spacing: 0.02em;
+  z-index: 3;
+  display: flex;
+  align-items: center;
+  background: #fcf7ef;
+  padding: 0.3em 2em 0.3em 2.8em;
+  border-radius: 16px;
+  box-shadow:
+    6px 6px 18px #e6e1d6,
+    -6px -6px 18px #fdfcf7,
+    0 2px 10px 0 rgba(245,158,66,0.08);
+  border: none;
+}
+section h2::before {
+  content: "";
+  display: inline-block;
+  width: 0.7em;
+  height: 0.7em;
+  margin-right: 0.8em;
+  margin-left: -1.2em;
+  background: radial-gradient(circle at 60% 40%, #f59e42 70%, #fbbf24 100%);
+  border-radius: 50%;
+  vertical-align: baseline;
+  margin-top: 0.08em;
+}
+
+/* 本文の上部余白を調整（タイトルと重ならないように） */
+section > *:not(h2):first-child {
+  margin-top: 110px;
+}
+
+h3 {
+  color: #b45309;
+  font-weight: 700;
+  margin-top: 1.5em;
+  margin-bottom: 1em;
+  line-height: 1.2;
+  font-size: 1.5em;
+}
+
+/* リスト */
+ul, ol {
+  margin-left: 2em;
+  margin-bottom: 2em;
+  padding-left: 0;
+  list-style: none;
+}
+li {
+  margin-bottom: 0.5em;
+  font-size: 1.05em;
+  position: relative;
+  padding-left: 2em;
+  line-height: 1.7;
+}
+
+ul li::before {
+  content: "";
+  position: absolute;
+  left: 0.1em;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.2em;
+  height: 1.2em;
+  background-image: url('data:image/svg+xml;utf8,<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 10.5L9 14.5L15 7.5" stroke="%23f59e42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  background-size: 1.2em 1.2em;
+  background-repeat: no-repeat;
+  background-position: center;
+  display: inline-block;
+}
+
+ol li::before {
+  content: counter(item) ".";
+  counter-increment: item;
+  position: absolute;
+  left: 0.2em;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #f59e42;
+  font-weight: bold;
+  font-size: 1.1em;
+}
+ol {
+  counter-reset: item;
+}
+
+/* コードブロック */
+pre, code {
+  background: #fef3c7;
+  color: #b45309;
+  border-radius: 6px;
+  padding: 0.2em 0.5em;
+  font-family: "Fira Mono", "Menlo", "Consolas", monospace;
+  font-size: 0.98em;
+}
+
+/* テーブル */
+table {
+  border-collapse: collapse;
+  width: 100%;
+  margin-bottom: 2em;
+}
+th, td {
+  border: 1px solid #fbbf24;
+  padding: 16px 18px;
+  text-align: left;
+}
+th {
+  background: #fef3c7;
+  color: #b45309;
+  font-weight: 700;
+}
+
+/* 引用 */
+blockquote {
+  border-left: 4px solid #f59e42;
+  background: #fef3c7;
+  color: #b45309;
+  padding: 1.2em 2em;
+  margin: 2em 0;
+  border-radius: 4px;
+  font-style: italic;
+}
+
+/* 画像 */
+img {
+  max-width: 80%;
+  border-radius: 8px;
+  margin: 2em 0;
+  box-shadow: 0 2px 8px rgba(245,158,66,0.08);
+}
+
+/* 表紙専用：git風装飾 */
+.git-decoration {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  z-index: 10;
+  pointer-events: none;
+}
+.git-dot {
+  width: 18px;
+  height: 18px;
+  background: radial-gradient(circle at 60% 40%, #f59e42 70%, #fbbf24 100%);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(245,158,66,0.18);
+  border: 2.5px solid #fff;
+}
+.git-line {
+  width: 36px;
+  height: 4px;
+  background: linear-gradient(90deg, #f59e42 0%, #fbbf24 100%);
+  border-radius: 2px;
+}
+
+/* ブランチ分岐をイメージした表紙装飾 */
+.git-decoration-branch {
+  position: absolute;
+  top: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: 320px;
+  height: 120px;
+  z-index: 10;
+  pointer-events: none;
+}
+.git-decoration-branch .main-branch {
+  display: flex;
+  align-items: center;
+  position: absolute;
+  top: 0;
+  left: 0;
+}
+.git-dot {
+  width: 24px;
+  height: 24px;
+  background: radial-gradient(circle at 60% 40%, #f59e42 70%, #fbbf24 100%);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(245,158,66,0.18);
+  border: 3px solid #fff;
+}
+.git-line {
+  width: 44px;
+  height: 6px;
+  background: linear-gradient(90deg, #f59e42 0%, #fbbf24 100%);
+  border-radius: 3px;
+}
+.branch-l {
+  position: absolute;
+  left: calc(2 * 24px + 2 * 44px + 15px);
+  top: 30px;
+  width: 120px;
+  height: 58px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+}
+.branch-vertical {
+  width: 6px;
+  height: 32px;
+  background: linear-gradient(180deg, #f59e42 0%, #fbbf24 100%);
+  border-radius: 3px;
+  margin-left: 9px;
+}
+.branch-horizontal {
+  width: 63px;
+  height: 6px;
+  background: linear-gradient(90deg, #f59e42 0%, #fbbf24 100%);
+  border-radius: 12px;
+  margin-left: 9px;
+  margin-top: -4px;
+}
+.git-branch-dot {
+  width: 24px;
+  height: 24px;
+  background: radial-gradient(circle at 60% 40%, #f59e42 70%, #fbbf24 100%);
+  border-radius: 50%;
+  box-shadow: 0 2px 8px rgba(245,158,66,0.18);
+  border: 3px solid #fff;
+  margin-left: 72px;
+  margin-top: -18px;
+}
+
+section > *:not(h1):not(h2):not(h3) {
+  font-size: 1.3em;
+}
+
+.books-flex {
+  display: flex;
+  gap: 48px;
+  align-items: flex-start;
+  justify-content: center;
+  margin-top: 1.5em;
+  margin-bottom: 1.5em;
+}
+.book-item {
+  flex: 1;
+  min-width: 0;
+  text-align: center;
+}
+
+.book-item-desc {
+  font-size: 0.9em;
+  line-height: 1.7;
+  color: #222;
+  margin-top: 0.3em;
+  margin-bottom: 0.3em;
+  text-align: left;
+  padding-left: 2em;
+  position: relative;
+}
+.book-item-desc::before {
+  content: "";
+  position: absolute;
+  left: 0.1em;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 1.2em;
+  height: 1.2em;
+  background-image: url('data:image/svg+xml;utf8,<svg width="20" height="20" viewBox="0 0 20 20" fill="none" xmlns="http://www.w3.org/2000/svg"><path d="M5 10.5L9 14.5L15 7.5" stroke="%23f59e42" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>');
+  background-size: 1.2em 1.2em;
+  background-repeat: no-repeat;
+  background-position: center;
+  display: inline-block;
+}
