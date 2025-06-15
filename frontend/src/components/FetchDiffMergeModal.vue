@@ -15,6 +15,18 @@ function mapById(nodes: any[]) {
   return map
 }
 
+// 末尾名でグルーピング用のパス表示関数をトップレベルに移動
+function getNodePathForMap(node: any, nodeMap: Record<string, any>): string {
+  if (!node) return ''
+  const path: string[] = []
+  let current = node
+  while (current) {
+    path.unshift(current.name)
+    current = current.parentId ? nodeMap[current.parentId] : null
+  }
+  return path.join(' / ')
+}
+
 // 3方向マージ判定＋親競合集約
 const mergeResult = computed(() => {
   const baseMap = mapById(props.baseNodes)
@@ -26,9 +38,8 @@ const mergeResult = computed(() => {
     ...props.fetchedNodes.map(n => n.id)
   ]))
 
-  const autoMerged: any[] = []
-  const conflicts: any[] = []
-
+  // まず競合候補をすべてリストアップ
+  const allConflictsMap: Record<string, { id: string, base: any, local: any, remote: any }> = {}
   for (const id of allIds) {
     const base = baseMap[id]
     const local = myMap[id]
@@ -48,6 +59,105 @@ const mergeResult = computed(() => {
       continue
     }
 
+    // idごとに1つだけにする
+    if (!allConflictsMap[id]) {
+      allConflictsMap[id] = { id, base, local, remote }
+    } else {
+      if (base) allConflictsMap[id].base = base
+      if (local) allConflictsMap[id].local = local
+      if (remote) allConflictsMap[id].remote = remote
+    }
+  }
+  // まずID単位の競合リストを作る
+  const allConflicts: any[] = Object.values(allConflictsMap)
+
+  // 1. ID単位で親が競合ノードID集合に含まれているかを判定して除外
+  const allConflictIds = new Set(allConflicts.map(c => c.base?.id || c.local?.id || c.remote?.id))
+  function hasAncestorConflictById(node: any, nodeMap: Record<string, any>): boolean {
+    let current = node
+    while (current && current.parentId) {
+      if (allConflictIds.has(current.parentId)) return true
+      current = nodeMap[current.parentId]
+    }
+    return false
+  }
+  const allConflictsFiltered = allConflicts.filter(c => {
+    const node = c.base || c.local || c.remote
+    if (!node) return false
+    if (hasAncestorConflictById(node, baseMap)) {
+      // 内容差分がある場合は残す
+      if (c.base && c.local && (c.base.name !== c.local.name || c.base.hash !== c.local.hash)) return true
+      if (c.base && c.remote && (c.base.name !== c.remote.name || c.base.hash !== c.remote.hash)) return true
+      if (c.local && c.remote && (c.local.name !== c.remote.name || c.local.hash !== c.remote.hash)) return true
+      return false
+    }
+    return true
+  })
+
+  // 2. 名前単位でグルーピング
+  function getNodeNameKey(node: any): string {
+    return node?.name || ''
+  }
+  const nameKeyMap: Record<string, { base: any, local: any, remote: any, key: string }> = {}
+  for (const c of allConflictsFiltered) {
+    const baseKey = c.base ? getNodeNameKey(c.base) : ''
+    const localKey = c.local ? getNodeNameKey(c.local) : ''
+    const remoteKey = c.remote ? getNodeNameKey(c.remote) : ''
+    const key = baseKey || localKey || remoteKey
+    if (!nameKeyMap[key]) {
+      nameKeyMap[key] = { base: c.base, local: c.local, remote: c.remote, key }
+    } else {
+      if (!nameKeyMap[key].base && c.base) nameKeyMap[key].base = c.base
+      if (!nameKeyMap[key].local && c.local) nameKeyMap[key].local = c.local
+      if (!nameKeyMap[key].remote && c.remote) nameKeyMap[key].remote = c.remote
+    }
+  }
+  const mergedConflicts = Object.values(nameKeyMap)
+  // localまたはremoteが存在するものだけに絞り込む
+  const filteredConflictsFinal = mergedConflicts.filter(c => c.local || c.remote)
+
+  // 祖先探索用ノードマップ
+  const allNodeMap = { ...baseMap, ...myMap, ...fetchedMap }
+  // 競合ノードIDリスト（仮で空、後でセット）
+  let conflictIds = new Set<string>()
+  function hasConflictAncestor(nodeId: string): boolean {
+    let current = allNodeMap[nodeId]
+    while (current && current.parentId) {
+      if (conflictIds.has(current.parentId)) return true
+      current = allNodeMap[current.parentId]
+    }
+    return false
+  }
+  // filteredConflicts生成
+  const parentConflictIds = new Set<string>()
+  const filteredConflicts: any[] = []
+  for (const c of allConflictsFiltered) {
+    const node = c.local || c.remote
+    // 親が競合ノードかどうかを再帰的に判定
+    let skip = false
+    let current = node
+    while (current && current.parentId) {
+      if (parentConflictIds.has(current.parentId)) {
+        skip = true
+        break
+      }
+      current = allNodeMap[current.parentId]
+    }
+    if (skip) continue
+    filteredConflicts.push(c)
+    if (c.local) parentConflictIds.add(c.local.id)
+    if (c.remote) parentConflictIds.add(c.remote.id)
+  }
+  // 競合ノードIDリストを再セット
+  conflictIds = new Set(filteredConflicts.map(c => c.id))
+  // autoMerged生成: 競合ノード自身・親が競合ノードのものは除外
+  const autoMerged: any[] = []
+  for (const id of allIds) {
+    if (conflictIds.has(id)) continue
+    if (hasConflictAncestor(id)) continue
+    const base = baseMap[id]
+    const local = myMap[id]
+    const remote = fetchedMap[id]
     // 追加ノード
     if (!base && local && !remote) {
       autoMerged.push(local)
@@ -57,84 +167,40 @@ const mergeResult = computed(() => {
       autoMerged.push(remote)
       continue
     }
-    // 追加だが両方で異なる内容
+    // 追加だが両方で同じ内容
     if (!base && local && remote) {
-      if (local.hash !== remote.hash || local.name !== remote.name || local.parentId !== remote.parentId || local.depth !== remote.depth) {
-        conflicts.push({ id, base, local, remote })
-      } else {
+      if (local.hash === remote.hash && local.name === remote.name && local.parentId === remote.parentId && local.depth === remote.depth) {
         autoMerged.push(local)
+        continue
       }
-      continue
     }
-
-    // 削除
-    if (base && !local && !remote) {
-      continue
-    }
-    if (base && !local && remote) {
-      if (base.hash !== remote.hash || base.name !== remote.name || base.parentId !== remote.parentId || base.depth !== remote.depth) {
-        conflicts.push({ id, base, local, remote })
-      }
-      continue
-    }
-    if (base && local && !remote) {
-      if (base.hash !== local.hash || base.name !== local.name || base.parentId !== local.parentId || base.depth !== local.depth) {
-        conflicts.push({ id, base, local, remote })
-      }
-      continue
-    }
-
     // 変更
     if (base && local && remote) {
       const localChanged = base.hash !== local.hash || base.name !== local.name || base.parentId !== local.parentId || base.depth !== local.depth
       const remoteChanged = base.hash !== remote.hash || base.name !== remote.name || base.parentId !== remote.parentId || base.depth !== remote.depth
-      if (localChanged && remoteChanged && (
-        local.hash !== remote.hash || local.name !== remote.name || local.parentId !== remote.parentId || local.depth !== remote.depth
-      )) {
-        conflicts.push({ id, base, local, remote })
-      } else if (localChanged && !remoteChanged) {
+      if (localChanged && !remoteChanged) {
         autoMerged.push(local)
+        continue
       } else if (!localChanged && remoteChanged) {
         autoMerged.push(remote)
+        continue
       } else if (!localChanged && !remoteChanged) {
         // 何もしない
-      } else {
+        continue
+      } else if (localChanged && remoteChanged && (
+        local.hash === remote.hash && local.name === remote.name && local.parentId === remote.parentId && local.depth === remote.depth
+      )) {
         autoMerged.push(local)
+        continue
       }
-      continue
     }
   }
 
-  // --- 親競合集約ロジック ---
-  // 1. 競合ノードを深さ（depth）で降順ソート（子→親の順）
-  conflicts.sort((a, b) => (b.local?.depth || b.remote?.depth || 0) - (a.local?.depth || a.remote?.depth || 0))
-  const parentConflictIds = new Set()
-  const filteredConflicts = []
-  for (const c of conflicts) {
-    // 親が競合リストに含まれている場合は除外（ただし自身に内容差分があれば個別競合）
-    const localParent = c.local?.parentId
-    const remoteParent = c.remote?.parentId
-    let skip = false
-    if ((localParent && parentConflictIds.has(localParent)) || (remoteParent && parentConflictIds.has(remoteParent))) {
-      // ノード自身に名称変更や内容差分があれば個別競合
-      const local = c.local
-      const remote = c.remote
-      const base = c.base
-      const isNodeConflict =
-        (base && local && (base.name !== local.name || base.hash !== local.hash)) ||
-        (base && remote && (base.name !== remote.name || base.hash !== remote.hash)) ||
-        (local && remote && (local.name !== remote.name || local.hash !== remote.hash))
-      if (!isNodeConflict) {
-        skip = true
-      }
-    }
-    if (skip) continue
-    filteredConflicts.push(c)
-    if (c.local) parentConflictIds.add(c.local.id)
-    if (c.remote) parentConflictIds.add(c.remote.id)
-  }
+  console.log('allConflicts', allConflicts);
+  console.log('filteredConflicts', filteredConflicts);
+  console.log('autoMerged', autoMerged);
 
-  return { autoMerged, conflicts: filteredConflicts }
+  return { autoMerged, conflicts: filteredConflictsFinal, allNodeMap, getNodePathForMap }
 })
 
 const conflictChoices = ref<Record<string, 'local'|'remote'>>({})
@@ -142,7 +208,7 @@ const conflictChoices = ref<Record<string, 'local'|'remote'>>({})
 function onResolve() {
   const merged = [...mergeResult.value.autoMerged]
   for (const c of mergeResult.value.conflicts) {
-    const choice = conflictChoices.value[c.id]
+    const choice = conflictChoices.value[c.key]
     if (choice === 'local' && c.local) merged.push(c.local)
     else if (choice === 'remote' && c.remote) merged.push(c.remote)
   }
@@ -184,21 +250,21 @@ function getNodeArrayForNode(node: any): any[] {
         <div class="merge-col">
           <h3>競合</h3>
           <ul>
-            <li v-for="c in mergeResult.conflicts" :key="c.id" style="margin-bottom:0.7em;">
+            <li v-for="c in mergeResult.conflicts" :key="c.key" style="margin-bottom:0.7em;">
               <div class="diff-deleted">
-                <span class="diff-sign">ー</span>{{ getNodePath(c.base, props.baseNodes) }}
+                <span class="diff-sign">ー</span>{{ c.base ? mergeResult.getNodePathForMap(c.base, mergeResult.allNodeMap) : '削除' }}
               </div>
               <div class="diff-added" style="display:flex; align-items:center; gap:1em;">
-                <span class="diff-sign">＋</span>{{ getNodePath(c.local, props.myNodes) || '削除' }}
-                <input type="radio" :name="'conflict-'+c.id" value="local" v-model="conflictChoices[c.id]">
+                <span class="diff-sign">＋</span>{{ c.local ? mergeResult.getNodePathForMap(c.local, mergeResult.allNodeMap) : '削除' }}
+                <input type="radio" :name="'conflict-'+c.key" value="local" v-model="conflictChoices[c.key]">
                 <span style="font-size:0.95em; color:#347474;">自分</span>
               </div>
               <div class="diff-added" style="margin-top:0.2em; display:flex; align-items:center; gap:1em;">
-                <span class="diff-sign">＋</span>{{ getNodePath(c.remote, props.fetchedNodes) || '削除' }}
-                <input type="radio" :name="'conflict-'+c.id" value="remote" v-model="conflictChoices[c.id]">
+                <span class="diff-sign">＋</span>{{ c.remote ? mergeResult.getNodePathForMap(c.remote, mergeResult.allNodeMap) : '削除' }}
+                <input type="radio" :name="'conflict-'+c.key" value="remote" v-model="conflictChoices[c.key]">
                 <span style="font-size:0.95em; color:#c41d7f;">fetch</span>
               </div>
-              <div v-if="!conflictChoices[c.id]" style="color:#c41d7f; font-size:0.93em; margin-top:0.2em;">どちらかを選択してください</div>
+              <div v-if="!conflictChoices[c.key]" style="color:#c41d7f; font-size:0.93em; margin-top:0.2em;">どちらかを選択してください</div>
             </li>
           </ul>
         </div>
