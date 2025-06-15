@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, defineEmits } from 'vue'
+import { defineProps, defineEmits, ref } from 'vue'
 import OrganizationTree from './OrganizationTree.vue'
 
 const props = defineProps<{
@@ -7,8 +7,46 @@ const props = defineProps<{
   loadingMerge: boolean
   draftNodes: any[]
   fetchedDraftNodes: any[]
+  baseNodes: any[]
 }>()
-const emit = defineEmits(['merge', 'cancel'])
+const emit = defineEmits(['merge', 'diff', 'cancel'])
+
+const showDiffModal = ref(false)
+const mergedDraft = ref<any[]>([])
+const hasConflict = ref(false)
+
+function unflatten(nodes: any[]): any[] {
+  const nodeMap: Record<string, any> = {}
+  nodes.forEach(n => {
+    nodeMap[String(n.id)] = { ...n, children: [] }
+  })
+  nodes.forEach(n => {
+    const parentKey = n.parentId == null ? null : String(n.parentId)
+    if (parentKey && nodeMap[parentKey]) {
+      nodeMap[parentKey].children.push(nodeMap[String(n.id)])
+    }
+  })
+  const roots = nodes.filter(n => n.parentId === null || n.parentId === '' || n.parentId === undefined || !nodeMap[String(n.parentId)]).map(n => nodeMap[String(n.id)])
+  roots.sort((a: any, b: any) => {
+    const nameCmp = a.name.localeCompare(b.name, 'ja')
+    if (nameCmp !== 0) return nameCmp
+    return a.id.localeCompare(b.id)
+  })
+  return roots
+}
+
+function onDiff() {
+  emit('diff')
+}
+function onCloseDiffModal() {
+  showDiffModal.value = false
+}
+function onResolveMerge(nodes: any[]) {
+  // 解決後、ドラフトを更新する処理をここに
+  mergedDraft.value = nodes
+  showDiffModal.value = false
+  // 必要なら再度モーダルを開く/差分再計算など
+}
 </script>
 <template>
   <div v-if="props.show">
@@ -22,10 +60,11 @@ const emit = defineEmits(['merge', 'cancel'])
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:60px;">
           <div style="display:flex; gap:0.7em; align-items:center;">
-            <button @click="emit('merge')" style="display:flex; align-items:center; justify-content:center; background: #222; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
+            <button @click="emit('cancel')" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
+            <button @click="emit('merge')" :disabled="hasConflict" style="display:flex; align-items:center; justify-content:center; background: #222; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
               <span style="font-size:1em; margin-right:0.5em;">←</span>merge
             </button>
-            <button @click="emit('cancel')" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
+            <button @click="onDiff" style="display:flex; align-items:center; justify-content:center; background: #347474; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">差分</button>
           </div>
         </div>
         <div style="flex: 1; min-width:0; text-align:center; display:flex; flex-direction:column; align-items:center; justify-content:center;">
@@ -34,10 +73,10 @@ const emit = defineEmits(['merge', 'cancel'])
       </div>
       <div style="display: flex; gap: 2em; width:100%;">
         <div style="flex: 1; min-width:0;">
-          <OrganizationTree :nodes="props.draftNodes" :maxDepth="5" />
+          <OrganizationTree :nodes="unflatten(props.draftNodes)" :maxDepth="5" />
         </div>
         <div style="flex: 1; min-width:0;">
-          <OrganizationTree :nodes="props.fetchedDraftNodes" :maxDepth="5" />
+          <OrganizationTree :nodes="unflatten(props.fetchedDraftNodes)" :maxDepth="5" />
         </div>
       </div>
     </div>

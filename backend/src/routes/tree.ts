@@ -14,14 +14,14 @@ router.get('/trees/:id', async (req, res) => {
   const treeId = req.params.id
   try {
     const result = await pool.query(`
-      SELECT n.id, n.name, n.depth, tn.parent_id
+      SELECT n.id, n.name, n.depth, tn.parent_id, n.hash
       FROM org_tree_node tn
       JOIN org_node n ON tn.node_id = n.id
       WHERE tn.tree_id = $1
     `, [treeId])
     const nodesById: Record<string, any> = Object.create(null)
     result.rows.forEach((row: any) => {
-      nodesById[row.id] = { id: row.id, name: row.name, depth: row.depth, children: [] }
+      nodesById[row.id] = { id: row.id, name: row.name, depth: row.depth, hash: row.hash, children: [] }
     })
     const roots: any[] = []
     result.rows.forEach((row: any) => {

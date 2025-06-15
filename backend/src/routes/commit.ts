@@ -212,4 +212,42 @@ router.post('/merge_commit_share', async (req, res) => {
   }
 });
 
+// 3方向マージ用: 共通baseコミット取得API
+router.get('/merge-base', async (req, res) => {
+  const { local_commit_id, remote_commit_id } = req.query;
+  if (!local_commit_id || !remote_commit_id) {
+    return res.status(400).json({ error: 'local_commit_id, remote_commit_idは必須です' });
+  }
+  // 1. すべてのコミットをMapで取得
+  const allCommitsRes = await pool.query('SELECT * FROM org_commit');
+  const commitMap = new Map(allCommitsRes.rows.map((c: any) => [String(c.id), c]));
+  // 2. ancestorチェーンを作成
+  function getAncestors(commitId: string): string[] {
+    const ids: string[] = [];
+    let cur = commitMap.get(String(commitId));
+    while (cur) {
+      ids.push(String(cur.id));
+      cur = cur.parent_commit_id ? commitMap.get(String(cur.parent_commit_id)) : undefined;
+    }
+    return ids;
+  }
+  const localAncestors = getAncestors(String(local_commit_id));
+  const remoteAncestors = getAncestors(String(remote_commit_id));
+  // 3. 共有コミットIDリスト
+  const shareRes = await pool.query('SELECT commit_id FROM org_commit_share');
+  const sharedSet = new Set(shareRes.rows.map((r: any) => String(r.commit_id)));
+  // 4. 共通baseを決定
+  const common = localAncestors.filter(id => remoteAncestors.includes(id) && sharedSet.has(id));
+  if (common.length === 0) {
+    return res.json({ base_commit_id: null });
+  }
+  const base_commit_id = common[0];
+  const base_commit = commitMap.get(base_commit_id);
+  return res.json({
+    base_commit_id,
+    tree_id: base_commit.tree_id,
+    commit: base_commit
+  });
+});
+
 export default router 

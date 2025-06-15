@@ -12,6 +12,7 @@ import FetchCompareView from './components/FetchCompareView.vue'
 import LoginForm from './components/LoginForm.vue'
 import type { CSSProperties } from 'vue'
 import HeaderBar from './components/HeaderBar.vue'
+import FetchDiffMergeModal from './components/FetchDiffMergeModal.vue'
 
 const store = useStore()
 const treeId = ref('')
@@ -62,6 +63,9 @@ const showFetchCompare = ref(false)
 const fetchedDraftNodes = ref<any[]>([])
 const loadingMerge = ref(false)
 const sharedCommitIds = ref<string[]>([])
+const baseNodes = ref<any[]>([])
+const baseLoading = ref(false)
+const showFetchDiffMergeModal = ref(false)
 
 const hasDraft = computed(() => {
   const diff = calcDiff(flatten(treeNodes.value), store.state.draftNodes)
@@ -79,37 +83,32 @@ const hasUnfetchedSharedCommit = computed(() => {
   return sharedCommits.value.some((s: any) => !myParentIds.has(s.commit_id))
 })
 
+function flatten(nodes: any[], parentId: string | null = null): any[] {
+  const res: any[] = []
+  const visited = new Set()
+  function dfs(n: any, parentId: string | null) {
+    if (visited.has(String(n.id))) return
+    visited.add(String(n.id))
+    // childrenを除外
+    const { children, ...rest } = n
+    res.push({ ...rest, id: String(n.id), parentId: parentId === undefined || parentId === '' ? null : parentId })
+    if (Array.isArray(n.children)) n.children.forEach((child: any) => dfs(child, n.id))
+  }
+  nodes.forEach((n: any) => dfs(n, parentId))
+  return res
+}
+
 function unflatten(nodes: any[]): any[] {
   const nodeMap: Record<string, any> = {}
-  nodes.forEach(n => {
-    nodeMap[String(n.id)] = { ...n, children: [] }
-  })
+  nodes.forEach(n => { nodeMap[n.id] = { ...n, children: [] } })
   nodes.forEach(n => {
     const parentKey = n.parentId == null ? null : String(n.parentId)
     if (parentKey && nodeMap[parentKey]) {
-      nodeMap[parentKey].children.push(nodeMap[String(n.id)])
+      nodeMap[parentKey].children.push(nodeMap[n.id])
     }
   })
-  // 各childrenをname昇順+id昇順で安定ソート
-  Object.values(nodeMap).forEach((n: any) => {
-    if (n.children && n.children.length > 0) {
-      n.children.sort((a: any, b: any) => {
-        const nameCmp = a.name.localeCompare(b.name, 'ja')
-        if (nameCmp !== 0) return nameCmp
-        return a.id.localeCompare(b.id)
-      })
-    }
-  })
-  console.log('[unflatten] nodes:', nodes)
-  // parentIdがnull/空文字/undefined/親がいないものをルートに（parentIdはstringで比較）
-  const roots = nodes.filter(n => n.parentId === null || n.parentId === '' || n.parentId === undefined || !nodeMap[String(n.parentId)]).map(n => nodeMap[String(n.id)])
-  console.log('[unflatten] roots:', roots)
-  // ルートもname昇順+id昇順で安定ソート
-  roots.sort((a: any, b: any) => {
-    const nameCmp = a.name.localeCompare(b.name, 'ja')
-    if (nameCmp !== 0) return nameCmp
-    return a.id.localeCompare(b.id)
-  })
+  const roots = nodes.filter(n => n.parentId === null || n.parentId === '' || n.parentId === undefined || !nodeMap[n.parentId]).map(n => nodeMap[n.id])
+  roots.sort((a: any, b: any) => (a.name || '').localeCompare(b.name || '', 'ja') || a.id.localeCompare(b.id))
   return roots
 }
 
@@ -172,6 +171,9 @@ async function fetchLatestTree() {
     }
     const treeData = await treeRes.json()
     console.log('[fetchLatestTree] treeData.nodes:', treeData.nodes)
+    console.log('root:', treeData.nodes[0])
+    console.log('child:', treeData.nodes[0].children[0])
+    console.log('grandchild:', treeData.nodes[0].children[0]?.children?.[0])
     treeNodes.value = treeData.nodes
     store.commit('setDraftNodes', flatten(treeData.nodes))
     await fetchCommitList()
@@ -185,9 +187,24 @@ async function fetchLatestTree() {
 
 async function fetchCommitList() {
   try {
-    // 自分のコミットのみ取得
+    // 1. 自分のコミットのみ取得
     const myCommits = await store.dispatch('fetchMyCommits')
-    commitList.value = myCommits
+    // 2. 共有コミットも取得
+    let sharedCommitsArr = []
+    if (sharedCommitIds.value.length > 0) {
+      const sharedRes = await fetch(`http://localhost:3001/api/commits?ids=${sharedCommitIds.value.join(',')}`)
+      if (sharedRes.ok) {
+        sharedCommitsArr = await sharedRes.json()
+      }
+    }
+    // 3. 重複を除いてマージ
+    const allCommits = [...myCommits]
+    for (const s of sharedCommitsArr) {
+      if (!allCommits.some((c: any) => c.id === s.id)) {
+        allCommits.push(s)
+      }
+    }
+    commitList.value = allCommits
   } catch (e) {
     // 必要ならエラー処理
   }
@@ -256,25 +273,13 @@ onMounted(() => {
   })
 })
 
-function flatten(nodes: any[], parentId: string | null = null): any[] {
-  const res: any[] = []
-  const visited = new Set()
-  function dfs(n: any, parentId: string | null) {
-    if (visited.has(String(n.id))) return
-    visited.add(String(n.id))
-    res.push({ ...n, id: String(n.id), parentId: parentId === undefined || parentId === '' ? null : parentId })
-    if (n.children) (n.children as any[]).forEach((child: any) => dfs(child, n.id))
-  }
-  nodes.forEach((n: any) => dfs(n, parentId))
-  return res
-}
-
 function nodeForCompare(n: any) {
   return {
     id: String(n.id),
     name: String(n.name),
     parentId: n.parentId == null ? null : String(n.parentId),
     depth: n.depth == null ? null : Number(n.depth),
+    hash: n.hash ?? null, // hashも比較対象に
   }
 }
 
@@ -431,9 +436,8 @@ async function handlePushShare() {
   }
 }
 
-function handleFetchShare() {
-  // fetch案内時のfetchボタン押下時の処理（必要に応じて実装）
-  showToast('fetch機能は未実装です', 'error')
+async function handleFetchShare() {
+  await fetchLatestSharedCommit()
 }
 
 async function fetchLatestSharedCommit() {
@@ -709,6 +713,83 @@ function onCommitFromDiff() {
       isCommitting.value = false
     })
 }
+
+function onFetchCompareDiff() {
+  showFetchDiffMergeModal.value = true
+}
+
+function onCloseFetchDiffMergeModal() {
+  showFetchDiffMergeModal.value = false
+}
+
+function onResolveFetchDiffMergeModal(nodes: any[]) {
+  // 必要に応じてドラフト更新など
+  showFetchDiffMergeModal.value = false
+}
+
+// DiffModalのbaseFlatもfetch用に切り替える
+const fetchBaseFlat = computed(() => flatten(treeNodes.value))
+
+// baseコミットID探索ロジック
+async function updateBaseNodes() {
+  baseLoading.value = true
+  try {
+    // 1. local, remote両方のcommit_idを取得
+    // local: 自分の最新コミット
+    const localCommit = commitList.value.find(c => c.id === commitId.value)
+    // remote: fetchした共有コミット
+    const remoteCommitShare = latestSharedCommit.value
+    const remoteCommitId = remoteCommitShare?.commit_id
+    if (!localCommit || !remoteCommitId) {
+      baseNodes.value = []
+      console.log('baseNodes: 共通baseコミットなし')
+      return
+    }
+    // 2. merge-base APIでbaseコミットIDとtree_idを取得
+    const res = await fetch(`http://localhost:3001/api/merge-base?local_commit_id=${localCommit.id}&remote_commit_id=${remoteCommitId}`)
+    if (!res.ok) {
+      baseNodes.value = []
+      console.log('baseNodes: merge-base API失敗')
+      return
+    }
+    const data = await res.json()
+    if (!data.base_commit_id || !data.tree_id) {
+      baseNodes.value = []
+      console.log('baseNodes: 共通baseコミットなし')
+      return
+    }
+    // 3. tree_idからノードリスト取得
+    const treeRes = await fetch(`http://localhost:3001/api/trees/${data.tree_id}`)
+    if (!treeRes.ok) {
+      baseNodes.value = []
+      console.log('baseNodes: tree API失敗')
+      return
+    }
+    const treeData = await treeRes.json()
+    baseNodes.value = flatten(treeData.nodes)
+    console.log('baseNodes(flattened)', baseNodes.value[0])
+    console.log('myNodes(flattened)', store.state.draftNodes[0])
+    console.log('fetchedNodes(flattened)', fetchedDraftNodes.value[0])
+
+    if (
+      baseNodes.value.length > 0 &&
+      localCommit && remoteCommitShare &&
+      baseNodes.value[0].name === localCommit.name &&
+      baseNodes.value[0].name === remoteCommitShare.name
+    ) {
+      console.log('skip: all same');
+      baseNodes.value = []
+      return
+    }
+  } finally {
+    baseLoading.value = false
+  }
+}
+
+// fetch比較モーダルを開くたびにbaseNodesを更新
+watch([showFetchCompare, commitList, latestSharedCommit, sharedCommitIds], ([show]) => {
+  if (show) updateBaseNodes()
+})
 </script>
 
 <template>
@@ -738,10 +819,12 @@ function onCommitFromDiff() {
           <FetchCompareView
             :show="true"
             :loadingMerge="loadingMerge"
-            :draftNodes="unflatten(store.state.draftNodes)"
-            :fetchedDraftNodes="unflatten(fetchedDraftNodes)"
+            :draftNodes="store.state.draftNodes"
+            :fetchedDraftNodes="fetchedDraftNodes"
+            :baseNodes="baseNodes"
             @merge="onMergeClick"
             @cancel="onCancelFetchCompare"
+            @diff="onFetchCompareDiff"
           />
         </template>
         <div v-else-if="noCommit && !hasDraft && !appliedCommitId" style="width:100%; background:#fffbe6; color:#ad8b00; border-radius:8px; padding:1.2em 1.5em; margin-bottom:1.5em;">
@@ -811,7 +894,7 @@ function onCommitFromDiff() {
           <DiffModal
             :show="showDiff"
             :diffResult="diffResult"
-            :baseFlat="baseFlat"
+            :baseFlat="fetchBaseFlat"
             :commitMessage="commitMessage"
             :isCommitting="isCommitting"
             @commit="onCommitFromDiff"
@@ -829,6 +912,14 @@ function onCommitFromDiff() {
             :hasUnfetchedSharedCommit="hasUnfetchedSharedCommit"
           />
         </div>
+        <FetchDiffMergeModal
+          :show="showFetchDiffMergeModal"
+          :baseNodes="baseNodes"
+          :myNodes="store.state.draftNodes"
+          :fetchedNodes="fetchedDraftNodes"
+          @close="onCloseFetchDiffMergeModal"
+          @resolve="onResolveFetchDiffMergeModal"
+        />
       </template>
     </div>
   </div>

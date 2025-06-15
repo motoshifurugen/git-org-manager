@@ -10,15 +10,23 @@ const props = defineProps<{
 }>()
 const emit = defineEmits(['commit', 'close', 'update:commitMessage'])
 
-function getNodePath(node: any, baseFlatArr: any[]): string {
+function getNodePath(node: any, nodeArr: any[]): string {
+  if (!node) return ''
   const path: string[] = []
   let current = node
-  const map = baseFlatArr.reduce((acc: Record<string, any>, n: any) => { acc[n.id] = n; return acc }, {} as Record<string, any>)
+  const map = nodeArr.reduce((acc: Record<string, any>, n: any) => { acc[n.id] = n; return acc }, {} as Record<string, any>)
   while (current) {
     path.unshift(current.name)
     current = current.parentId ? map[current.parentId] : null
   }
   return path.join(' / ')
+}
+function getNodeArrayForNode(node: any): any[] {
+  if (!node) return []
+  if (props.diffResult.added.find((n: any) => n.id === node.id)) return props.diffResult.added
+  if (props.diffResult.deleted.find((n: any) => n.id === node.id)) return props.diffResult.deleted
+  if (props.baseFlat.find((n: any) => n.id === node.id)) return props.baseFlat
+  return []
 }
 function getOldNode(newNode: any) {
   const baseFlat = props.baseFlat
@@ -38,7 +46,7 @@ function onInputCommitMessage(e: Event) {
           <h3>追加</h3>
           <ul>
             <li v-for="n in props.diffResult.added" :key="'a'+n.id" class="diff-added">
-              <span class="diff-sign">＋</span>{{ getNodePath(n, props.baseFlat) }}
+              <span class="diff-sign">＋</span>{{ getNodePath(n, getNodeArrayForNode(n)) }}
             </li>
           </ul>
         </div>
@@ -46,7 +54,7 @@ function onInputCommitMessage(e: Event) {
           <h3>削除</h3>
           <ul>
             <li v-for="n in props.diffResult.deleted" :key="'d'+n.id" class="diff-deleted">
-              <span class="diff-sign">ー</span>{{ getNodePath(n, props.baseFlat) }}
+              <span class="diff-sign">ー</span>{{ getNodePath(n, getNodeArrayForNode(n)) }}
             </li>
           </ul>
         </div>
@@ -58,7 +66,7 @@ function onInputCommitMessage(e: Event) {
                 <span class="diff-sign">ー</span>{{ getNodePath(getOldNode(n), props.baseFlat) }}
               </div>
               <div class="diff-added">
-                <span class="diff-sign">＋</span>{{ getNodePath(n, props.baseFlat) }}
+                <span class="diff-sign">＋</span>{{ getNodePath(n, getNodeArrayForNode(n)) }}
               </div>
             </li>
           </ul>
