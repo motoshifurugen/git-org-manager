@@ -205,14 +205,48 @@ const mergeResult = computed(() => {
 
 const conflictChoices = ref<Record<string, 'local'|'remote'>>({})
 
-function onResolve() {
-  const merged = [...mergeResult.value.autoMerged]
-  for (const c of mergeResult.value.conflicts) {
-    const choice = conflictChoices.value[c.key]
-    if (choice === 'local' && c.local) merged.push(c.local)
-    else if (choice === 'remote' && c.remote) merged.push(c.remote)
+function collectDescendantIds(node: any, nodeMap: Record<string, any>): Set<string> {
+  const ids = new Set<string>();
+  function dfs(n: any) {
+    if (!n) return;
+    ids.add(n.id);
+    for (const child of Object.values(nodeMap)) {
+      if (child.parentId === n.id) dfs(child);
+    }
   }
-  emit('resolve', merged)
+  dfs(node);
+  return ids;
+}
+
+function onResolve() {
+  // 1. baseNodesをベースに
+  const baseMap: Record<string, any> = mapById(props.baseNodes);
+  const myMap: Record<string, any> = mapById(props.myNodes);
+  const fetchedMap: Record<string, any> = mapById(props.fetchedNodes);
+
+  // 2. 競合で「選択しなかった側」の差分を消す
+  let excludeIds = new Set<string>();
+
+  for (const c of mergeResult.value.conflicts) {
+    const choice = conflictChoices.value[c.key];
+    let notChosen = null;
+    if (choice === 'local') {
+      notChosen = c.remote;
+    } else if (choice === 'remote') {
+      notChosen = c.local;
+    }
+    if (notChosen) {
+      // notChosenノード＋子孫IDを取得
+      const allNodeMap = { ...baseMap, ...myMap, ...fetchedMap };
+      const ids = collectDescendantIds(notChosen, allNodeMap);
+      for (const id of ids) excludeIds.add(id);
+    }
+  }
+
+  // 3. baseNodesからexcludeIdsを除外したものが新しいドラフト
+  const merged = props.baseNodes.filter(n => !excludeIds.has(n.id));
+
+  emit('resolve', merged, mergeResult.value.conflicts.length);
 }
 
 function getNodePath(node: any, nodeArr: any[]): string {
@@ -359,4 +393,8 @@ ul {
   padding-left: 0;
   margin: 0 0 0.5em 0;
 }
-</style> 
+</style>
+
+<script lang="ts">
+export default {}
+</script>

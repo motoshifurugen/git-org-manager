@@ -13,6 +13,7 @@ import LoginForm from './components/LoginForm.vue'
 import type { CSSProperties } from 'vue'
 import HeaderBar from './components/HeaderBar.vue'
 import FetchDiffMergeModal from './components/FetchDiffMergeModal.vue'
+import { calcThreeWayMerge } from './utils/threeWayMerge'
 
 const store = useStore()
 const treeId = ref('')
@@ -66,6 +67,7 @@ const sharedCommitIds = ref<string[]>([])
 const baseNodes = ref<any[]>([])
 const baseLoading = ref(false)
 const showFetchDiffMergeModal = ref(false)
+const hasConflict = ref(false)
 
 const hasDraft = computed(() => {
   const diff = calcDiff(flatten(treeNodes.value), store.state.draftNodes)
@@ -722,9 +724,12 @@ function onCloseFetchDiffMergeModal() {
   showFetchDiffMergeModal.value = false
 }
 
-function onResolveFetchDiffMergeModal(nodes: any[]) {
-  // 必要に応じてドラフト更新など
+function onResolveFetchDiffMergeModal(nodes: any[], conflictCount?: number) {
+  // ドラフトを更新
+  store.commit('setDraftNodes', nodes)
   showFetchDiffMergeModal.value = false
+  // 競合が残っていればhasConflictをtrue、なければfalse
+  hasConflict.value = !!conflictCount
 }
 
 // DiffModalのbaseFlatもfetch用に切り替える
@@ -790,6 +795,22 @@ async function updateBaseNodes() {
 watch([showFetchCompare, commitList, latestSharedCommit, sharedCommitIds], ([show]) => {
   if (show) updateBaseNodes()
 })
+
+// 3方向マージ競合判定watch
+watch(
+  [baseNodes, () => store.state.draftNodes, fetchedDraftNodes],
+  ([base, my, fetched]) => {
+    if (!base?.length || !my?.length || !fetched?.length) {
+      hasConflict.value = false
+      console.log('[競合判定] 判定スキップ base/my/fetched:', base?.length, my?.length, fetched?.length, '→ hasConflict:', hasConflict.value)
+      return
+    }
+    const { conflicts } = calcThreeWayMerge(base, my, fetched)
+    hasConflict.value = conflicts.length > 0
+    console.log('[競合判定] base:', base.length, 'my:', my.length, 'fetched:', fetched.length, 'conflicts:', conflicts.length, '→ hasConflict:', hasConflict.value)
+  },
+  { immediate: true, deep: true }
+)
 </script>
 
 <template>
@@ -822,6 +843,7 @@ watch([showFetchCompare, commitList, latestSharedCommit, sharedCommitIds], ([sho
             :draftNodes="store.state.draftNodes"
             :fetchedDraftNodes="fetchedDraftNodes"
             :baseNodes="baseNodes"
+            :hasConflict="hasConflict"
             @merge="onMergeClick"
             @cancel="onCancelFetchCompare"
             @diff="onFetchCompareDiff"

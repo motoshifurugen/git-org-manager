@@ -8,6 +8,7 @@ const props = defineProps<{
   draftNodes: any[]
   fetchedDraftNodes: any[]
   baseNodes: any[]
+  hasConflict: boolean
 }>()
 const emit = defineEmits(['merge', 'diff', 'cancel'])
 
@@ -41,11 +42,16 @@ function onDiff() {
 function onCloseDiffModal() {
   showDiffModal.value = false
 }
-function onResolveMerge(nodes: any[]) {
+function onResolveMerge(nodes: any[], conflictCount?: number) {
   // 解決後、ドラフトを更新する処理をここに
   mergedDraft.value = nodes
   showDiffModal.value = false
-  // 必要なら再度モーダルを開く/差分再計算など
+  // 競合が残っていればhasConflictをtrue、なければfalse
+  hasConflict.value = !!conflictCount
+}
+function onOpenDiffModal(conflictCount?: number) {
+  showDiffModal.value = true
+  hasConflict.value = !!conflictCount
 }
 </script>
 <template>
@@ -61,7 +67,7 @@ function onResolveMerge(nodes: any[]) {
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:60px;">
           <div style="display:flex; gap:0.7em; align-items:center;">
             <button @click="emit('cancel')" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
-            <button @click="emit('merge')" :disabled="hasConflict" style="display:flex; align-items:center; justify-content:center; background: #222; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
+            <button class="modal-btn primary" @click="emit('merge')" :disabled="props.hasConflict" style="display:flex; align-items:center; justify-content:center; background: #222; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
               <span style="font-size:1em; margin-right:0.5em;">←</span>merge
             </button>
             <button @click="onDiff" style="display:flex; align-items:center; justify-content:center; background: #347474; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">差分</button>
@@ -96,6 +102,13 @@ function onResolveMerge(nodes: any[]) {
 @keyframes spin {
   0% { transform: rotate(0deg); }
   100% { transform: rotate(360deg); }
+}
+button:disabled {
+  pointer-events: none;
+  opacity: 0.5;
+  background: #b0b8c9;
+  color: #fff;
+  cursor: not-allowed;
 }
 </style>
 
