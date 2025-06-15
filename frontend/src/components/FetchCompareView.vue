@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { defineProps, defineEmits, ref } from 'vue'
+import { defineProps, defineEmits, ref, computed, onMounted, onBeforeUnmount } from 'vue'
 import OrganizationTree from './OrganizationTree.vue'
 
 const props = defineProps<{
@@ -15,6 +15,30 @@ const emit = defineEmits(['merge', 'diff', 'cancel'])
 const showDiffModal = ref(false)
 const mergedDraft = ref<any[]>([])
 const hasConflict = ref(false)
+const showTooltip = ref(false)
+const btnRef = ref<HTMLElement | null>(null)
+const tooltipStyle = computed(() => {
+  if (!btnRef.value) return {}
+  const rect = btnRef.value.getBoundingClientRect()
+  return {
+    position: 'fixed',
+    left: `${rect.left + rect.width / 2}px`,
+    top: `${rect.top - 40}px`, // ボタンの上40px
+    transform: 'translateX(-50%)',
+    zIndex: 99999,
+    background: '#222',
+    color: '#fff',
+    padding: '0.7em 1.5em',
+    borderRadius: '8px',
+    fontSize: '1.05em',
+    whiteSpace: 'nowrap',
+    boxShadow: '0 8px 32px rgba(0,0,0,0.25)',
+    fontWeight: 'bold',
+    letterSpacing: '0.03em',
+    pointerEvents: 'none',
+    opacity: '0.97',
+  } as any
+})
 
 function unflatten(nodes: any[]): any[] {
   const nodeMap: Record<string, any> = {}
@@ -65,11 +89,19 @@ function onOpenDiffModal(conflictCount?: number) {
           <h2 style="margin:0;">自分の最新コミット</h2>
         </div>
         <div style="display:flex; flex-direction:column; align-items:center; justify-content:center; min-width:60px;">
-          <div style="display:flex; gap:0.7em; align-items:center;">
+          <div style="display:flex; gap:0.7em; align-items:center; position:relative; overflow:visible;">
             <button @click="emit('cancel')" style="display:flex; align-items:center; justify-content:center; background: #e0e4ea; color: #2d3a4a; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">中止</button>
-            <button class="modal-btn primary" @click="emit('merge')" :disabled="props.hasConflict" style="display:flex; align-items:center; justify-content:center; background: #222; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
-              <span style="font-size:1em; margin-right:0.5em;">←</span>merge
-            </button>
+            <div class="merge-btn-wrapper" style="position:relative; display:block;"
+                 @mouseenter="showTooltip = props.hasConflict"
+                 @mouseleave="showTooltip = false">
+              <button ref="btnRef" class="modal-btn primary" @click="emit('merge')" :disabled="props.hasConflict"
+                style="display:flex; align-items:center; justify-content:center; background: #222; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">
+                <span style="font-size:1em; margin-right:0.5em;">←</span>merge
+              </button>
+              <teleport to="body">
+                <div v-if="props.hasConflict && showTooltip" :style="tooltipStyle">競合があるためマージできません</div>
+              </teleport>
+            </div>
             <button @click="onDiff" style="display:flex; align-items:center; justify-content:center; background: #347474; color: #fff; border: none; border-radius: 6px; padding: 0.5em 1.2em; font-weight: 600; font-size: 1em;">差分</button>
           </div>
         </div>
@@ -109,6 +141,13 @@ button:disabled {
   background: #b0b8c9;
   color: #fff;
   cursor: not-allowed;
+}
+.merge-btn-wrapper {
+  position: relative;
+  display: block;
+}
+.merge-tooltip {
+  z-index: 99999;
 }
 </style>
 
